@@ -3,6 +3,7 @@ from snowflake.connector import SnowflakeConnection
 from snowflake.connector.cursor import SnowflakeCursor
 from dotenv import load_dotenv
 import os
+import pandas as pd
 load_dotenv()
 
 class snowflake_conn(SnowflakeConnection):
@@ -101,6 +102,23 @@ class snowflake_conn(SnowflakeConnection):
         """
         results = self.cur.fetchall()
         return results
+    
+    def query_to_pandas(self, query: str, nrows: int = 10) -> pd.DataFrame:
+        """
+        Execute a SQL query and return the results as a pandas DataFrame.
+        
+        This method executes the provided SQL query and returns the results as a pandas DataFrame.
+        Args:
+            query (str): The SQL query string to execute.
+            nrows (int): The number of rows to fetch from the result set.
+        Returns:
+            pd.DataFrame: A pandas DataFrame containing the query results.
+        """
+        self.execute(query)
+        result = self.cur.fetchmany(nrows) 
+        result2 = [list(i) for i in result]
+        cols = [i[0] for i in self.cur.description]
+        return pd.DataFrame(result2, columns=cols)
 
     def close(self) -> None:
         """

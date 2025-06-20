@@ -8,6 +8,33 @@ from snowflake_conn import snowflake_conn
 # Load environment variables
 load_dotenv()
 
+def clean_sql_query(sql_query: str) -> str:
+    """
+    Clean SQL query by removing markdown code block markers.
+    
+    Args:
+        sql_query (str): SQL query that may contain markdown formatting
+        
+    Returns:
+        str: Clean SQL query without markdown markers
+    """
+    if not sql_query:
+        return sql_query
+        
+    clean_sql = sql_query.strip()
+    
+    # Remove opening markdown markers
+    if clean_sql.startswith("```sql"):
+        clean_sql = clean_sql[6:]
+    elif clean_sql.startswith("```"):
+        clean_sql = clean_sql[3:]
+    
+    # Remove closing markdown markers
+    if clean_sql.endswith("```"):
+        clean_sql = clean_sql[:-3]
+    
+    return clean_sql.strip()
+
 # Load UI configuration
 @st.cache_data
 def load_ui_config():
@@ -93,7 +120,7 @@ def initialize_pipeline(_conn):
         st.error(f"Failed to initialize pipeline: {str(e)}")
         return None
 
-def display_chat_message(role, message, sql_query=None, dataframe=None):
+def display_chat_message(role, message, sql_query=None, dataframe=None, msg_index=None):
     """Display a chat message with proper styling."""
     if role == "user":
         st.markdown(f"""
@@ -116,7 +143,71 @@ def display_chat_message(role, message, sql_query=None, dataframe=None):
             with col1:
                 if sql_query:
                     with st.expander(ui_config["chat"]["sql_expander_title"], expanded=False):
-                        st.code(sql_query, language="sql")
+                        # Create a unique key for this message's edit state
+                        if msg_index is None:
+                            msg_index = len(st.session_state.messages) - 1
+                        edit_key = f"edit_sql_{msg_index}"
+                        
+                        # Initialize edit state if not exists
+                        if edit_key not in st.session_state:
+                            st.session_state[edit_key] = False
+                        
+                        # Create columns for SQL display and edit button
+                        sql_col1, sql_col2 = st.columns([0.85, 0.15])
+                        
+                        with sql_col2:
+                            # Pencil icon button to toggle edit mode
+                            if st.button("✏️", key=f"edit_btn_{msg_index}", help="Edit SQL Query"):
+                                st.session_state[edit_key] = not st.session_state[edit_key]
+                                st.rerun()
+                        
+                        with sql_col1:
+                            if st.session_state[edit_key]:
+                                # Edit mode: show text area with clean SQL
+                                clean_sql = clean_sql_query(sql_query)
+                                
+                                edited_sql = st.text_area(
+                                    "Edit SQL Query:", 
+                                    value=clean_sql, 
+                                    height=200,
+                                    key=f"sql_editor_{msg_index}"
+                                )
+                                
+                                # Save and Execute, and Cancel buttons
+                                btn_col1, btn_col3, btn_col2 = st.columns([1.5, 1, 1])
+                                with btn_col1:
+                                    if st.button("💾 Save and Execute", key=f"save_sql_{msg_index}", use_container_width=True):
+                                        try:
+                                            # Clean the edited SQL query before execution
+                                            clean_edited_sql = clean_sql_query(edited_sql)
+                                            
+                                            # Execute the cleaned SQL query
+                                            with st.spinner("Executing query..."):
+                                                new_dataframe = st.session_state.conn.query_to_pandas(clean_edited_sql)
+                                            
+                                            # Update the SQL query and dataframe in the message
+                                            st.session_state.messages[msg_index]["sql_query"] = clean_edited_sql
+                                            st.session_state.messages[msg_index]["dataframe"] = new_dataframe
+                                            st.session_state[edit_key] = False
+                                            
+                                            # Show success message
+                                            st.success("Query executed successfully!")
+                                            st.rerun()
+                                            
+                                        except Exception as e:
+                                            st.error(f"Error executing query: {str(e)}")
+                                            # Still save the cleaned query even if execution fails
+                                            clean_edited_sql = clean_sql_query(edited_sql)
+                                            st.session_state.messages[msg_index]["sql_query"] = clean_edited_sql
+                                            st.session_state[edit_key] = False
+                                
+                                with btn_col2:
+                                    if st.button("❌ Cancel", key=f"cancel_sql_{msg_index}", use_container_width=True):
+                                        st.session_state[edit_key] = False
+                                        st.rerun()
+                            else:
+                                # View mode: show code
+                                st.code(sql_query, language="sql")
             
             with col2:
                 if dataframe is not None and not dataframe.empty:
@@ -186,12 +277,13 @@ def main():
     # Display chat history
     chat_container = st.container()
     with chat_container:
-        for message in st.session_state.messages:
+        for i, message in enumerate(st.session_state.messages):
             display_chat_message(
                 message["role"], 
                 message["content"], 
                 message.get("sql_query"),
-                message.get("dataframe")
+                message.get("dataframe"),
+                msg_index=i
             )
     
     # Chat input
@@ -212,11 +304,14 @@ def main():
                 # Use the pipeline to process the question
                 result = st.session_state.pipeline.process_question(user_input)
                 
+                # Clean the SQL query from the pipeline result
+                clean_sql = clean_sql_query(result["sql_query"])
+                
                 # Add assistant response to chat history
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": result["natural_response"],
-                    "sql_query": result["sql_query"],
+                    "sql_query": clean_sql,
                     "dataframe": result.get("dataframe")
                 })
                 
@@ -268,10 +363,12 @@ def main():
                 with st.spinner(ui_config["status_messages"]["processing_example"]):
                     try:
                         result = st.session_state.pipeline.process_question(question)
+                        # Clean the SQL query from the pipeline result
+                        clean_sql = clean_sql_query(result["sql_query"])
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": result["natural_response"],
-                            "sql_query": result["sql_query"],
+                            "sql_query": clean_sql,
                             "dataframe": result.get("dataframe")
                         })
                     except Exception as e:

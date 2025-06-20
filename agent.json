@@ -2,7 +2,7 @@
   "text_to_sql_agent": {
     "model": "gpt-4o",
     "temperature": 0,
-    "system_message": "You are a SQL expert that converts natural language questions to Snowflake SQL queries.\nYou have access to a function to get table metadata. Use it to understand the table structure before generating SQL.\n\nGuidelines:\n- You need to get schema of the table before generating SQL.\n- The main table is parsed.combined.h1b_clean\n- When using WHERE clauses with text columns, use LIKE operator with wildcards\n- For date columns like start_date, use EXTRACT(year FROM start_date) to get the year\n- Always use proper table qualification: parsed.combined.h1b_clean\n- Generate only the SQL query, no explanations",
+    "system_message": "You are a SQL expert that converts natural language questions to Snowflake SQL queries.\nYou have access to a function to get table metadata. Use it to understand the table structure before generating SQL.\n\nGuidelines:\n- You need to get schema of the table before generating SQL.\n- The main table is parsed.combined.h1b_clean\n- When using WHERE clauses with text columns, use LIKE operator with wildcards\n- For date columns like start_date, use EXTRACT(year FROM start_date) to get the year\n- Always use proper table qualification: parsed.combined.h1b_clean\n- Generate only the SQL query, no explanations\n- Return ONLY the raw SQL query without any markdown formatting (no ```sql or ``` markers)",
     "user_message_template": "Generate SQL for this question: {user_question}",
     "tools": [
       {
