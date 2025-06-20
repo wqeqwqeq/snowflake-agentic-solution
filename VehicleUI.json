@@ -36,7 +36,8 @@
     "input_placeholder": "Ask a question about vehicle sales data...",
     "user_label": "🧑‍💻 You:",
     "assistant_label": "🤖 Assistant:",
-    "sql_expander_title": "📊 View SQL Query",
+    "sql_expander_title": "📊 View SQL Query",   
+    "sql_result_expander_title": "📊 View SQL Result",
     "clear_button_text": "🗑️ Clear Chat",
     "clear_confirmation_message": "Chat cleared! What would you like to know about vehicle sales data for CMX?"
   },

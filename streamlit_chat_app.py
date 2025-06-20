@@ -93,7 +93,7 @@ def initialize_pipeline(_conn):
         st.error(f"Failed to initialize pipeline: {str(e)}")
         return None
 
-def display_chat_message(role, message, sql_query=None):
+def display_chat_message(role, message, sql_query=None, dataframe=None):
     """Display a chat message with proper styling."""
     if role == "user":
         st.markdown(f"""
@@ -110,9 +110,18 @@ def display_chat_message(role, message, sql_query=None):
         </div>
         """, unsafe_allow_html=True)
         
-        if sql_query:
-            with st.expander(ui_config["chat"]["sql_expander_title"], expanded=False):
-                st.code(sql_query, language="sql")
+        if sql_query or (dataframe is not None and not dataframe.empty):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if sql_query:
+                    with st.expander(ui_config["chat"]["sql_expander_title"], expanded=False):
+                        st.code(sql_query, language="sql")
+            
+            with col2:
+                if dataframe is not None and not dataframe.empty:
+                    with st.expander(ui_config["chat"]["sql_result_expander_title"], expanded=False):
+                        st.dataframe(dataframe)
 
 def main():
     # Header
@@ -170,7 +179,8 @@ def main():
         st.session_state.messages.append({
             "role": "assistant",
             "content": ui_config["main"]["welcome_message"],
-            "sql_query": None
+            "sql_query": None,
+            "dataframe": None
         })
     
     # Display chat history
@@ -180,7 +190,8 @@ def main():
             display_chat_message(
                 message["role"], 
                 message["content"], 
-                message.get("sql_query")
+                message.get("sql_query"),
+                message.get("dataframe")
             )
     
     # Chat input
@@ -191,7 +202,8 @@ def main():
         st.session_state.messages.append({
             "role": "user",
             "content": user_input,
-            "sql_query": None
+            "sql_query": None,
+            "dataframe": None
         })
         
         # Process the question
@@ -204,7 +216,8 @@ def main():
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": result["natural_response"],
-                    "sql_query": result["sql_query"]
+                    "sql_query": result["sql_query"],
+                    "dataframe": result.get("dataframe")
                 })
                 
             except Exception as e:
@@ -212,7 +225,8 @@ def main():
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_message,
-                    "sql_query": None
+                    "sql_query": None,
+                    "dataframe": None
                 })
         
         # Rerun to display the new messages
@@ -226,7 +240,8 @@ def main():
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": ui_config["chat"]["clear_confirmation_message"],
-                "sql_query": None
+                "sql_query": None,
+                "dataframe": None
             })
             st.rerun()
     
@@ -245,7 +260,8 @@ def main():
                 st.session_state.messages.append({
                     "role": "user",
                     "content": question,
-                    "sql_query": None
+                    "sql_query": None,
+                    "dataframe": None
                 })
                 
                 # Process the example question
@@ -255,14 +271,16 @@ def main():
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": result["natural_response"],
-                            "sql_query": result["sql_query"]
+                            "sql_query": result["sql_query"],
+                            "dataframe": result.get("dataframe")
                         })
                     except Exception as e:
                         error_message = f"{ui_config['status_messages']['example_error_prefix']}{str(e)}"
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": error_message,
-                            "sql_query": None
+                            "sql_query": None,
+                            "dataframe": None
                         })
                 
                 st.rerun()

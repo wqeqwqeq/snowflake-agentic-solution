@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
 from snowflake_conn import snowflake_conn
+from llm_tools import get_table_metadata, execute_sql
 
 # Load environment variables from .env file
 load_dotenv()
@@ -58,37 +59,7 @@ class TextToSQLAgent:
         self.conn = conn
         self.config = load_agent_config(config_file)["text_to_sql_agent"]
         
-    def get_table_metadata(self, table_name: str = "H1B_clean") -> str:
-        """
-        Tool function to get metadata of a Snowflake table.
-        
-        Args:
-            table_name (str): Name of the table to get metadata for
-            
-        Returns:
-            str: Formatted table schema information
-        """
-        try:
-            self.conn.execute('USE DATABASE parsed')
-            self.conn.execute(f"""
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM parsed.information_schema.columns 
-                WHERE table_name = '{table_name.upper()}'
-                ORDER BY ordinal_position
-            """)
-            schema_data = self.conn.fetch()
-            
-            if schema_data:
-                schema_str = f"Table: parsed.combined.{table_name.lower()}\nColumns:\n"
-                for row in schema_data:
-                    nullable = "NULL" if row[2] == "YES" else "NOT NULL"
-                    default = f", DEFAULT: {row[3]}" if row[3] else ""
-                    schema_str += f"- {row[0]} ({row[1]}, {nullable}{default})\n"
-                return schema_str
-            else:
-                return f"No schema information found for table {table_name}"
-        except Exception as e:
-            return f"Error retrieving schema: {str(e)}"
+
     
     def generate_sql(self, user_question: str) -> str:
         """
@@ -130,9 +101,9 @@ class TextToSQLAgent:
                 function_args = json.loads(tool_call.function.arguments)
                 
                 if function_name == "get_table_metadata":
-                    table_name = function_args.get("table_name", "H1B_clean")
-                    function_result = self.get_table_metadata(table_name)
-                    
+                    db_schema_tbl = function_args.get("db_schema_tbl")
+                    print(function_args)
+                    function_result = get_table_metadata(self.conn, db_schema_tbl)
                     messages.append({
                         "tool_call_id": tool_call.id,
                         "role": "tool",
@@ -148,6 +119,7 @@ class TextToSQLAgent:
                 tool_choice="auto",
                 temperature=self.config["temperature"]
             )
+            print(messages)
         
         return response.choices[0].message.content.strip()
 
@@ -163,40 +135,7 @@ class SQLExecutionAgent:
         self.conn = conn
         self.config = load_agent_config(config_file)["sql_execution_agent"]
     
-    def execute_sql(self, sql_query: str) -> str:
-        """
-        Tool function to execute SQL query and fetch results.
-        
-        Args:
-            sql_query (str): SQL query to execute
-            
-        Returns:
-            str: Formatted query results
-        """
-        try:
-            self.conn.execute(sql_query)
-            results = self.conn.fetch()
-            
-            if results:
-                # Format results as a readable string
-                if len(results) == 1 and len(results[0]) == 1:
-                    # Single value result
-                    return str(results[0][0])
-                else:
-                    # Multiple rows/columns
-                    formatted_results = []
-                    for i, row in enumerate(results):
-                        if i < 10:  # Limit to first 10 rows for readability
-                            formatted_results.append(str(row))
-                        else:
-                            formatted_results.append(f"... and {len(results) - 10} more rows")
-                            break
-                    return "\n".join(formatted_results)
-            else:
-                return "No results returned from the query"
-                
-        except Exception as e:
-            return f"Error executing SQL: {str(e)}"
+
     
     def generate_response(self, user_question: str, sql_query: str) -> str:
         """
@@ -243,13 +182,13 @@ class SQLExecutionAgent:
                 
                 if function_name == "execute_sql":
                     sql_query = function_args["sql_query"]
-                    function_result = self.execute_sql(sql_query)
+                    df, df_string = execute_sql(self.conn, sql_query)
                     
                     messages.append({
                         "tool_call_id": tool_call.id,
                         "role": "tool",
                         "name": function_name,
-                        "content": function_result
+                        "content": df_string
                     })
             
             # Continue the conversation
@@ -261,7 +200,7 @@ class SQLExecutionAgent:
                 temperature=self.config["temperature"]
             )
         
-        return response.choices[0].message.content
+        return response.choices[0].message.content,df
 
 
 class TextToSQLPipeline:
@@ -294,14 +233,15 @@ class TextToSQLPipeline:
         
         # Step 2: Execute SQL and generate response using Model 2
         print("Step 2: Executing SQL and generating response...")
-        natural_response = self.sql_executor.generate_response(user_question, sql_query)
+        natural_response, df = self.sql_executor.generate_response(user_question, sql_query)
         print(f"Natural Language Response: {natural_response}")
         print()
         
         return {
             "question": user_question,
             "sql_query": sql_query,
-            "natural_response": natural_response
+            "natural_response": natural_response,
+            "dataframe": df
         }
 
 
