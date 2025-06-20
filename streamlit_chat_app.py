@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import json
 from dotenv import load_dotenv
 from azure_openai_models import TextToSQLPipeline
 from snowflake_conn import snowflake_conn
@@ -7,12 +8,29 @@ from snowflake_conn import snowflake_conn
 # Load environment variables
 load_dotenv()
 
-# Set page configuration
+# Load UI configuration
+@st.cache_data
+def load_ui_config():
+    """Load UI configuration from JSON file."""
+    try:
+        with open('H1BUI.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        st.error("UI configuration file (ui.json) not found!")
+        st.stop()
+    except json.JSONDecodeError as e:
+        st.error(f"Error parsing UI configuration: {str(e)}")
+        st.stop()
+
+# Load UI configuration
+ui_config = load_ui_config()
+
+# Set page configuration using config
 st.set_page_config(
-    page_title="Vehicle Sales Chat Assistant",
-    page_icon="🚗",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title=ui_config["page_config"]["page_title"],
+    page_icon=ui_config["page_config"]["page_icon"],
+    layout=ui_config["page_config"]["layout"],
+    initial_sidebar_state=ui_config["page_config"]["initial_sidebar_state"]
 )
 
 # Custom CSS for better styling
@@ -80,72 +98,69 @@ def display_chat_message(role, message, sql_query=None):
     if role == "user":
         st.markdown(f"""
         <div class="chat-message user-message">
-            <div class="message-header">🧑‍💻 You:</div>
+            <div class="message-header">{ui_config["chat"]["user_label"]}</div>
             <div>{message}</div>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div class="chat-message assistant-message">
-            <div class="message-header">🤖 Assistant:</div>
+            <div class="message-header">{ui_config["chat"]["assistant_label"]}</div>
             <div>{message}</div>
         </div>
         """, unsafe_allow_html=True)
         
         if sql_query:
-            with st.expander("📊 View SQL Query", expanded=False):
+            with st.expander(ui_config["chat"]["sql_expander_title"], expanded=False):
                 st.code(sql_query, language="sql")
 
 def main():
     # Header
-    st.title("🚗 Vehicle Sales Chat Assistant")
-    st.markdown("Ask questions about vehicle sales data for CMX in natural language!")
+    st.title(ui_config["main"]["title"])
+    st.markdown(ui_config["main"]["description"])
     
     # Sidebar with information
     with st.sidebar:
-        st.header("ℹ️ About")
-        st.markdown("""
-        This chat assistant helps you explore vehicle sales data for CMX using natural language queries.
+        st.header(ui_config["sidebar"]["about"]["header"])
         
-        **Features:**
-        - 🔍 Natural language to SQL conversion
-        - 📊 Automatic query execution
-        - 💬 Chat-like interface
-        - 📈 Data insights and analysis
+        # About section
+        about_content = ui_config["sidebar"]["about"]["description"] + "\n\n**Features:**\n"
+        for feature in ui_config["sidebar"]["about"]["features"]:
+            about_content += f"- {feature}\n"
         
-        **Example Questions:**
-        - "What's the average price for a used car?"
-        - "Show me top 5 models by sales"
-        - "How many sales were in 2024?"
-        """)
+        about_content += "\n**Example Questions:**\n"
+        for question in ui_config["sidebar"]["about"]["example_questions"]:
+            about_content += f"- \"{question}\"\n"
         
-        st.header("🔧 System Status")
+        st.markdown(about_content)
+        
+        st.header(ui_config["sidebar"]["system_status"]["header"])
         
         # Check environment variables
-        api_key_status = "✅" if os.getenv("AZURE_OPENAI_API_KEY") else "❌"
-        endpoint_status = "✅" if os.getenv("AZURE_OPENAI_ENDPOINT") else "❌"
+        api_key_status = ui_config["icons"]["success"] if os.getenv("AZURE_OPENAI_API_KEY") else ui_config["icons"]["error"]
+        endpoint_status = ui_config["icons"]["success"] if os.getenv("AZURE_OPENAI_ENDPOINT") else ui_config["icons"]["error"]
         
         st.markdown(f"""
-        - Azure OpenAI API Key: {api_key_status}
-        - Azure OpenAI Endpoint: {endpoint_status}
+        - {ui_config["sidebar"]["system_status"]["api_key_label"]}: {api_key_status}
+        - {ui_config["sidebar"]["system_status"]["endpoint_label"]}: {endpoint_status}
         """)
     
     # Initialize connections and pipeline
     if "conn" not in st.session_state:
-        with st.spinner("🔗 Connecting to Snowflake..."):
+        with st.spinner(ui_config["status_messages"]["connecting_snowflake"]):
             st.session_state.conn = initialize_connection()
     
     if "pipeline" not in st.session_state and st.session_state.conn:
-        with st.spinner("🚀 Initializing AI pipeline..."):
+        with st.spinner(ui_config["status_messages"]["initializing_pipeline"]):
             st.session_state.pipeline = initialize_pipeline(st.session_state.conn)
     
     # Check if initialization was successful
     if not st.session_state.conn:
-        st.error("❌ Unable to connect to Snowflake. Please check your connection settings.")
+        st.error(ui_config["status_messages"]["snowflake_error"])
         st.stop()
     
     if not st.session_state.pipeline:
-        st.error("❌ Unable to initialize AI pipeline. Please check your Azure OpenAI settings.")
+        st.error(ui_config["status_messages"]["pipeline_error"])
         st.stop()
     
     # Initialize chat history
@@ -154,7 +169,7 @@ def main():
         # Add welcome message
         st.session_state.messages.append({
             "role": "assistant",
-            "content": "Hello! I'm your vehicle sales assistant for CMX data. Ask me anything about vehicle sales, prices, models, or trends. What would you like to know?",
+            "content": ui_config["main"]["welcome_message"],
             "sql_query": None
         })
     
@@ -169,7 +184,7 @@ def main():
             )
     
     # Chat input
-    user_input = st.chat_input("Ask a question about vehicle sales data...")
+    user_input = st.chat_input(ui_config["chat"]["input_placeholder"])
     
     if user_input:
         # Add user message to chat history
@@ -180,7 +195,7 @@ def main():
         })
         
         # Process the question
-        with st.spinner("🤔 Thinking and querying the database..."):
+        with st.spinner(ui_config["status_messages"]["processing_question"]):
             try:
                 # Use the pipeline to process the question
                 result = st.session_state.pipeline.process_question(user_input)
@@ -193,7 +208,7 @@ def main():
                 })
                 
             except Exception as e:
-                error_message = f"I encountered an error while processing your question: {str(e)}"
+                error_message = f"{ui_config['status_messages']['error_prefix']}{str(e)}"
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_message,
@@ -206,32 +221,26 @@ def main():
     # Clear chat button
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if st.button(ui_config["chat"]["clear_button_text"], use_container_width=True):
             st.session_state.messages = []
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": "Chat cleared! What would you like to know about vehicle sales data for CMX?",
+                "content": ui_config["chat"]["clear_confirmation_message"],
                 "sql_query": None
             })
             st.rerun()
     
     # Sample questions
     st.markdown("---")
-    st.subheader("💡 Try these example questions:")
+    st.subheader(ui_config["sample_questions"]["header"])
     
-    example_questions = [
-        "What's the average price for vehicles sold in 2024?",
-        "Show me the top 5 vehicle models by sales volume",
-        "How many vehicles were sold this year?",
-        "What are the price trends for sedans?",
-        "Which vehicle models have the highest average selling price?"
-    ]
+    example_questions = ui_config["sample_questions"]["questions"]
     
     cols = st.columns(2)
     for i, question in enumerate(example_questions):
         col = cols[i % 2]
         with col:
-            if st.button(f"💬 {question}", key=f"example_{i}", use_container_width=True):
+            if st.button(f"{ui_config['icons']['chat_prefix']}{question}", key=f"example_{i}", use_container_width=True):
                 # Add the example question as user input
                 st.session_state.messages.append({
                     "role": "user",
@@ -240,7 +249,7 @@ def main():
                 })
                 
                 # Process the example question
-                with st.spinner("🤔 Processing example question..."):
+                with st.spinner(ui_config["status_messages"]["processing_example"]):
                     try:
                         result = st.session_state.pipeline.process_question(question)
                         st.session_state.messages.append({
@@ -249,7 +258,7 @@ def main():
                             "sql_query": result["sql_query"]
                         })
                     except Exception as e:
-                        error_message = f"I encountered an error: {str(e)}"
+                        error_message = f"{ui_config['status_messages']['example_error_prefix']}{str(e)}"
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": error_message,

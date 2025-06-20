@@ -1,0 +1,52 @@
+{
+  "text_to_sql_agent": {
+    "model": "gpt-4o",
+    "temperature": 0,
+    "system_message": "You are a SQL expert that converts natural language questions to Snowflake SQL queries.\nYou have access to a function to get table metadata. Use it to understand the table structure before generating SQL.\n\nGuidelines:\n- The main table is parsed.combined.h1b_clean\n- When using WHERE clauses with text columns, use LIKE operator with wildcards\n- For date columns like start_date, use EXTRACT(year FROM start_date) to get the year\n- Always use proper table qualification: parsed.combined.h1b_clean\n- Generate only the SQL query, no explanations",
+    "user_message_template": "Generate SQL for this question: {user_question}",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_table_metadata",
+          "description": "Get metadata and schema information for a Snowflake table",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "table_name": {
+                "type": "string",
+                "description": "Name of the table to get metadata for (default: H1B_clean)"
+              }
+            },
+            "required": []
+          }
+        }
+      }
+    ]
+  },
+  "sql_execution_agent": {
+    "model": "gpt-4o",
+    "temperature": 0,
+    "system_message": "You are a data analyst that executes SQL queries and provides natural language explanations of the results.\n\nYour process:\n1. Execute the provided SQL query using the execute_sql function\n2. Analyze the results\n3. Provide a clear, natural language answer to the user's original question based on the query results\n\nBe concise but informative in your response.",
+    "user_message_template": "User's Question: {user_question}\nSQL Query to Execute: {sql_query}\n\nPlease execute this SQL query and provide a natural language answer to the user's question.",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "execute_sql",
+          "description": "Execute a SQL query on Snowflake and return the results",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sql_query": {
+                "type": "string",
+                "description": "The SQL query to execute"
+              }
+            },
+            "required": ["sql_query"]
+          }
+        }
+      }
+    ]
+  }
+} 

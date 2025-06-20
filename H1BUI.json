@@ -1,0 +1,68 @@
+{
+  "page_config": {
+    "page_title": "H1B Visa Chat Assistant",
+    "page_icon": "🏢",
+    "layout": "wide",
+    "initial_sidebar_state": "expanded"
+  },
+  "main": {
+    "title": "🏢 H1B Visa Chat Assistant",
+    "description": "Ask questions about H1B visa data in natural language!",
+    "welcome_message": "Hello! I'm your H1B visa assistant. Ask me anything about H1B applications, approvals, salaries, sponsors, or trends. What would you like to know?"
+  },
+  "sidebar": {
+    "about": {
+      "header": "ℹ️ About",
+      "description": "This chat assistant helps you explore H1B visa data using natural language queries.",
+      "features": [
+        "🔍 Natural language to SQL conversion",
+        "📊 Automatic query execution",
+        "💬 Chat-like interface",
+        "📈 Data insights and analysis"
+      ],
+      "example_questions": [
+        "What's the average salary for H1B applicants?",
+        "Show me top 5 companies by H1B sponsorships",
+        "How many H1B applications were filed in 2024?"
+      ]
+    },
+    "system_status": {
+      "header": "🔧 System Status",
+      "api_key_label": "Azure OpenAI API Key",
+      "endpoint_label": "Azure OpenAI Endpoint"
+    }
+  },
+  "chat": {
+    "input_placeholder": "Ask a question about H1B visa data...",
+    "user_label": "🧑‍💻 You:",
+    "assistant_label": "🤖 Assistant:",
+    "sql_expander_title": "📊 View SQL Query",
+    "clear_button_text": "🗑️ Clear Chat",
+    "clear_confirmation_message": "Chat cleared! What would you like to know about H1B visa data?"
+  },
+  "sample_questions": {
+    "header": "💡 Try these example questions:",
+    "questions": [
+      "What's the average salary for H1B workers in 2024?",
+      "Show me the top 5 companies by H1B petition volume",
+      "How many H1B applications were approved this year?",
+      "What are the salary trends for software engineers?",
+      "Which job titles have the highest average H1B salaries?"
+    ]
+  },
+  "status_messages": {
+    "connecting_snowflake": "🔗 Connecting to Snowflake...",
+    "initializing_pipeline": "🚀 Initializing AI pipeline...",
+    "snowflake_error": "❌ Unable to connect to Snowflake. Please check your connection settings.",
+    "pipeline_error": "❌ Unable to initialize AI pipeline. Please check your Azure OpenAI settings.",
+    "processing_question": "🤔 Thinking and querying the database...",
+    "processing_example": "🤔 Processing example question...",
+    "error_prefix": "I encountered an error while processing your question: ",
+    "example_error_prefix": "I encountered an error: "
+  },
+  "icons": {
+    "success": "✅",
+    "error": "❌",
+    "chat_prefix": "💬 "
+  }
+} 

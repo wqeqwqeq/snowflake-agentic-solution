@@ -1,7 +1,9 @@
 from typing import Optional, Any, List, Tuple, Dict
 from snowflake.connector import SnowflakeConnection
 from snowflake.connector.cursor import SnowflakeCursor
-
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
 class snowflake_conn(SnowflakeConnection):
     """
@@ -45,7 +47,14 @@ class snowflake_conn(SnowflakeConnection):
             The connection uses hardcoded credentials. In production, consider using
             environment variables or secure credential management.
         """
-
+        super().__init__(
+            user="STANLEYSNOWFLAKE",
+            account="HTQEADI-ZNA89116",
+            password=os.getenv("SNOWFLAKE_PASSWORD"),
+            database="parsed",
+            schema="combined",
+            **kwargs
+        )
 
         self.cur: SnowflakeCursor = self.cursor()
 

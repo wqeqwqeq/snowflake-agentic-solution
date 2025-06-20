@@ -1,0 +1,68 @@
+{
+  "page_config": {
+    "page_title": "Vehicle Sales Chat Assistant",
+    "page_icon": "🚗",
+    "layout": "wide",
+    "initial_sidebar_state": "expanded"
+  },
+  "main": {
+    "title": "🚗 Vehicle Sales Chat Assistant",
+    "description": "Ask questions about vehicle sales data for CMX in natural language!",
+    "welcome_message": "Hello! I'm your vehicle sales assistant for CMX data. Ask me anything about vehicle sales, prices, models, or trends. What would you like to know?"
+  },
+  "sidebar": {
+    "about": {
+      "header": "ℹ️ About",
+      "description": "This chat assistant helps you explore vehicle sales data for CMX using natural language queries.",
+      "features": [
+        "🔍 Natural language to SQL conversion",
+        "📊 Automatic query execution",
+        "💬 Chat-like interface",
+        "📈 Data insights and analysis"
+      ],
+      "example_questions": [
+        "What's the average price for a used car?",
+        "Show me top 5 models by sales",
+        "How many sales were in 2024?"
+      ]
+    },
+    "system_status": {
+      "header": "🔧 System Status",
+      "api_key_label": "Azure OpenAI API Key",
+      "endpoint_label": "Azure OpenAI Endpoint"
+    }
+  },
+  "chat": {
+    "input_placeholder": "Ask a question about vehicle sales data...",
+    "user_label": "🧑‍💻 You:",
+    "assistant_label": "🤖 Assistant:",
+    "sql_expander_title": "📊 View SQL Query",
+    "clear_button_text": "🗑️ Clear Chat",
+    "clear_confirmation_message": "Chat cleared! What would you like to know about vehicle sales data for CMX?"
+  },
+  "sample_questions": {
+    "header": "💡 Try these example questions:",
+    "questions": [
+      "What's the average price for vehicles sold in 2024?",
+      "Show me the top 5 vehicle models by sales volume",
+      "How many vehicles were sold this year?",
+      "What are the price trends for sedans?",
+      "Which vehicle models have the highest average selling price?"
+    ]
+  },
+  "status_messages": {
+    "connecting_snowflake": "🔗 Connecting to Snowflake...",
+    "initializing_pipeline": "🚀 Initializing AI pipeline...",
+    "snowflake_error": "❌ Unable to connect to Snowflake. Please check your connection settings.",
+    "pipeline_error": "❌ Unable to initialize AI pipeline. Please check your Azure OpenAI settings.",
+    "processing_question": "🤔 Thinking and querying the database...",
+    "processing_example": "🤔 Processing example question...",
+    "error_prefix": "I encountered an error while processing your question: ",
+    "example_error_prefix": "I encountered an error: "
+  },
+  "icons": {
+    "success": "✅",
+    "error": "❌",
+    "chat_prefix": "💬 "
+  }
+} 
