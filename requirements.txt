@@ -4,3 +4,5 @@ python-dotenv>=1.0.0
 snowflake-connector-python>=3.0.0
 pandas>=2.0.0
 typing-extensions>=4.0.0 
+azure-search-documents
+azure-core

@@ -43,38 +43,29 @@ def get_table_metadata(conn, db_schema_tbl: str) -> str:
         return f"Error retrieving schema: {str(e)}"
 
 
-def execute_sql(conn, sql_query: str) -> tuple:
+def execute_sql(conn, sql_query: str, nrows: int = 10) -> tuple:
     """
     Tool function to execute SQL query and fetch results.
     
     Args:
         conn: Database connection object
         sql_query (str): SQL query to execute
+        nrows (int): Number of rows to fetch (default: 10)
         
     Returns:
         tuple: (pandas.DataFrame, str) - DataFrame and string representation of results
     """
-    import pandas as pd
-    
     try:
-        conn.execute(sql_query)
-        results = conn.fetch()
+        # Use the query_to_pandas method from the connection object
+        df = conn.query_to_pandas(sql_query, nrows=nrows)
         
-        if results:
-            # Get column names from cursor description
-            columns = [desc[0] for desc in conn.cur.description]
-            
-            # Create DataFrame
-            df = pd.DataFrame(results, columns=columns)
-            
+        if not df.empty:
             # Convert DataFrame to string representation
             df_string = df.to_string(index=False)
-            
             return df, df_string
         else:
             # Return empty DataFrame and message
-            empty_df = pd.DataFrame()
-            return empty_df, "No results returned from the query"
+            return df, "No results returned from the query"
             
     except Exception as e:
         # Return error as single-row DataFrame

@@ -139,6 +139,109 @@ class snowflake_conn(SnowflakeConnection):
         """
         super().close()
 
+    def get_metadata(self, db_schema_tbl: str) -> List[Dict]:
+        """
+        Get comprehensive metadata for a given table including column info and distinct values.
+        
+        This method analyzes a table's structure and data distribution by:
+        1. Getting column names and data types from information schema
+        2. For text columns, calculating distinct counts
+        3. For low-cardinality columns (distinct < 10), retrieving actual distinct values
+        
+        Args:
+            db_schema_tbl (str): Full table reference in format database.schema.table
+            
+        Returns:
+            List[Dict]: List of dictionaries containing metadata for each column:
+                - table_name: Full table name
+                - column_name: Column name
+                - data_type: Column data type
+                - distinct_count: Number of distinct values (for text columns)
+                - distinct_values: List of distinct values (if distinct_count < 10)
+                
+        Example:
+            >>> conn.get_table_metadata("mydb.myschema.mytable")
+            [{'table_name': 'MYDB.MYSCHEMA.MYTABLE', 'column_name': 'STATUS', 
+              'data_type': 'TEXT', 'distinct_count': 2, 'distinct_values': ['yes', 'no']}]
+        """
+        # Step 1: Split database.schema.table format
+        parts = db_schema_tbl.split('.')
+        if len(parts) != 3:
+            raise ValueError(f"Invalid table reference format. Expected database.schema.table, got: {db_schema_tbl}")
+        
+        database, schema, table = parts
+        full_table_name = f"{database.upper()}.{schema.upper()}.{table.upper()}"
+        
+        # Step 2: Get column names and data types
+        schema_query = f"""
+        SELECT column_name, data_type,comment
+        FROM {database.upper()}.information_schema.columns 
+        WHERE table_schema = '{schema.upper()}' 
+        AND table_name = '{table.upper()}'
+        ORDER BY ordinal_position
+        """
+        
+        self.execute(schema_query)
+        columns_info = self.fetch()
+        
+        if not columns_info:
+            return []
+        
+        # Create base metadata structure
+        metadata = []
+        text_columns = []
+        
+        for col_name, data_type, comment in columns_info:
+            col_metadata = {
+                'table_name': full_table_name.lower(),
+                'column_name': col_name,
+                'data_type': data_type,
+                'comment': comment if comment is not None else "",
+                'usage':""
+            }
+            metadata.append(col_metadata)
+            
+            # Track text columns for distinct value analysis
+            if 'TEXT' in data_type.upper() or 'VARCHAR' in data_type.upper() or 'CHAR' in data_type.upper():
+                text_columns.append(col_name)
+        
+        # Step 3: Get distinct counts for text columns
+        if text_columns:
+            distinct_select_parts = [f"COUNT(DISTINCT {col}) as cnt_distinct_{col}" for col in text_columns]
+            distinct_query = f"""
+            SELECT {', '.join(distinct_select_parts)}
+            FROM {full_table_name}
+            """
+            
+            self.execute(distinct_query)
+            distinct_counts = self.fetch()[0]  # Single row result
+            
+            # Map distinct counts back to metadata
+            text_col_index = 0
+            for i, col_metadata in enumerate(metadata):
+                if col_metadata['column_name'] in text_columns:
+                    distinct_count = distinct_counts[text_col_index]
+                    col_metadata['distinct_count'] = distinct_count
+                    text_col_index += 1
+        
+        # Step 4: Get actual distinct values for low-cardinality columns
+        for col_metadata in metadata:
+            if 'distinct_count' in col_metadata and col_metadata['distinct_count'] < 10:
+                col_name = col_metadata['column_name']
+                distinct_values_query = f"""
+                SELECT DISTINCT {col_name}
+                FROM {full_table_name}
+                WHERE {col_name} IS NOT NULL
+                ORDER BY {col_name}
+                """
+                
+                self.execute(distinct_values_query)
+                distinct_values_result = self.fetch()
+                distinct_values = [row[0] for row in distinct_values_result]
+                col_metadata['distinct_values'] = distinct_values
+        
+        return metadata
+
 
 
 
