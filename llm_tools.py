@@ -71,4 +71,29 @@ def execute_sql(conn, sql_query: str, nrows: int = 10) -> tuple:
         # Return error as single-row DataFrame
         error_df = pd.DataFrame({"Error": [str(e)]})
         error_string = f"Error executing SQL: {str(e)}"
-        return error_df, error_string 
+        return error_df, error_string
+
+
+def read_table_descriptions(file_path: str) -> str:
+    """
+    Tool function to read table descriptions from a markdown file.
+    
+    Args:
+        file_path (str): Path to the table description file
+        
+    Returns:
+        str: Content of the table description file
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        if content.strip():
+            return content
+        else:
+            return "Table description file is empty"
+            
+    except FileNotFoundError:
+        return f"Table description file not found: {file_path}"
+    except Exception as e:
+        return f"Error reading table description file: {str(e)}" 

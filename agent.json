@@ -1,9 +1,34 @@
 {
-  "text_to_sql_agent": {
+  "table_selection_agent": {
     "model": "gpt-4o",
     "temperature": 0,
-    "system_message": "You are a SQL expert that converts natural language questions to Snowflake SQL queries.\nYou have access to a function to get table metadata. Use it to understand the table structure before generating SQL.\n\nGuidelines:\n- You need to get schema of the table before generating SQL.\n- The main table is parsed.combined.h1b_clean\n- When using WHERE clauses with text columns, use LIKE operator with wildcards\n- For date columns like start_date, use EXTRACT(year FROM start_date) to get the year\n- Always use proper table qualification: parsed.combined.h1b_clean\n- Generate only the SQL query, no explanations\n- Return ONLY the raw SQL query without any markdown formatting (no ```sql or ``` markers)",
-    "user_message_template": "Generate SQL for this question: {user_question}",
+    "system_message": "You are a database table selection expert. Your job is to analyze user questions and determine which tables from the available database tables would be needed to answer the question.\n\nYou have access to table_description.md that explain what each table contains and their use cases. Based on the user's question, identify which tables are relevant.\n\nGuidelines:\n- Read the table_description.md file to understand available tables\n- Analyze the user's question to understand what data they need\n- Return a list of table names that would be needed to answer the question\n- Be comprehensive but not excessive - include all relevant tables but avoid unnecessary ones\n- Return the result as a list of table names in format [\"database.schema.table\", \"database.schema.table\", ...]",
+    "user_message_template": "Based on this question, which tables do I need to query?\n\nQuestion: {user_question}\n\nPlease analyze the question and return a list of the required table names, don't use ```json or ``` to wrap the list.",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_table_descriptions",
+          "description": "Read the table description file to understand available tables and their contents",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string",
+                "description": "Path to the table description file"
+              }
+            },
+            "required": ["file_path"]
+          }
+        }
+      }
+    ]
+  },
+  "column_selection_agent": {
+    "model": "gpt-4o",
+    "temperature": 0,
+    "system_message": "You are a database column selection expert. Your job is to analyze user questions and determine which specific columns from the selected tables are needed to answer the question.\n\nYou will receive a list of tables and a user question. Use the get_table_metadata function to understand the column structure of each table, then determine which columns are necessary.\n\nGuidelines:\n- Get metadata for each provided table to understand available columns\n- Analyze the user's question to determine what data points they need\n- Consider columns needed for filtering, grouping, calculating, and displaying results\n- Return a structured result with tables and their required columns\n- Include primary keys and foreign keys that might be needed for joins\n- Return the result as JSON in format: {\"table_name\": [\"column1\", \"column2\"], ...}",
+    "user_message_template": "Based on this question and the selected tables, which columns do I need?\n\nQuestion: {user_question}\nSelected Tables: {selected_tables}\n\nPlease analyze the question and return a JSON object mapping each table to its required columns. Don't use ```json or ``` to wrap the JSON object.",
     "tools": [
       {
         "type": "function",
@@ -23,6 +48,13 @@
         }
       }
     ]
+  },
+  "sql_generation_agent": {
+    "model": "gpt-4o",
+    "temperature": 0,
+    "system_message": "You are a SQL generation expert that creates Snowflake SQL queries based on user questions and selected tables/columns.\n\nYou will receive:\n- The user's original question\n- Selected tables and their relevant columns\n- Table metadata for context\n\nGuidelines:\n- Generate accurate Snowflake SQL queries only use the selected tables and columns\n- Use proper table qualification (database.schema.table)\n- When using WHERE clauses with text columns, use LIKE operator with wildcards\n- For date columns like start_date, use EXTRACT(year FROM start_date) to get the year\n- Use appropriate aggregation functions (COUNT, AVG, SUM, etc.)\n- Include proper GROUP BY and ORDER BY clauses when needed\n- Generate only the SQL query, no explanations\n- Return ONLY the raw SQL query without any markdown formatting (no ```sql or ``` markers)",
+    "user_message_template": "Generate SQL for this question using the selected tables and columns:\n\nQuestion: {user_question}\nSelected Tables and Columns: {selected_tables_columns}\n\nGenerate the SQL query to answer this question.",
+    "tools": []
   },
   "sql_execution_agent": {
     "model": "gpt-4o",
