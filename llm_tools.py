@@ -62,16 +62,16 @@ def execute_sql(conn, sql_query: str, nrows: int = 10) -> tuple:
         if not df.empty:
             # Convert DataFrame to string representation
             df_string = df.to_string(index=False)
-            return df, df_string
+            return df, df_string, True
         else:
             # Return empty DataFrame and message
-            return df, "No results returned from the query"
+            return df, "No results returned from the query", False
             
     except Exception as e:
         # Return error as single-row DataFrame
         error_df = pd.DataFrame({"Error": [str(e)]})
         error_string = f"Error executing SQL: {str(e)}"
-        return error_df, error_string
+        return error_df, error_string, False
 
 
 def read_table_descriptions(file_path: str) -> str:

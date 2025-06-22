@@ -4,9 +4,33 @@ import json
 from dotenv import load_dotenv
 from azure_openai_models import TextToSQLPipeline
 from snowflake_conn import snowflake_conn
+import time
 
 # Load environment variables
 load_dotenv()
+
+class ProgressSpinner:
+    """Custom progress spinner that can update text in real-time."""
+    
+    def __init__(self, initial_text="Processing..."):
+        self.placeholder = None
+        self.current_text = initial_text
+    
+    def __enter__(self):
+        self.placeholder = st.empty()
+        self.update_text(self.current_text)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.placeholder:
+            self.placeholder.empty()
+    
+    def update_text(self, text):
+        """Update the spinner text."""
+        self.current_text = text
+        if self.placeholder:
+            with self.placeholder:
+                st.info(f"⏳ {text}")
 
 def clean_sql_query(sql_query: str) -> str:
     """
@@ -95,6 +119,44 @@ st.markdown("""
         font-weight: bold;
         margin-bottom: 0.5rem;
     }
+    .thinking-step {
+        background-color: #f8f9fa;
+        border-left: 3px solid #007acc;
+        padding: 0.5rem;
+        margin: 0.3rem 0;
+        border-radius: 3px;
+    }
+    .thinking-step-completed {
+        border-left-color: #28a745;
+        background-color: #f0fff4;
+    }
+    .thinking-step-processing {
+        border-left-color: #ffc107;
+        background-color: #fffbf0;
+    }
+    .agent-name {
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    .step-details {
+        font-size: 0.9em;
+        color: #6c757d;
+        margin-top: 0.2rem;
+    }
+    .token-summary {
+        background-color: #e8f5e8;
+        border-left: 4px solid #28a745;
+        padding: 0.8rem;
+        margin: 0.5rem 0;
+        border-radius: 5px;
+    }
+    .token-metric {
+        text-align: center;
+        padding: 0.3rem;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        margin: 0.2rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -120,7 +182,166 @@ def initialize_pipeline(_conn):
         st.error(f"Failed to initialize pipeline: {str(e)}")
         return None
 
-def display_chat_message(role, message, sql_query=None, dataframe=None, msg_index=None):
+def display_thinking_process(thinking_process, token_usage=None, msg_index=None):
+    """Display the thinking process with expandable sections and token usage."""
+    if not thinking_process:
+        return
+    
+    with st.expander("🧠 AI Thinking Process", expanded=False):
+        # High-level view toggle
+        if msg_index is None:
+            msg_index = len(st.session_state.messages) - 1
+        detail_key = f"detail_mode_{msg_index}"
+        
+        if detail_key not in st.session_state:
+            st.session_state[detail_key] = False
+        
+        # Toggle button for detail level
+        col1, col2 = st.columns([0.8, 0.2])
+        with col2:
+            if st.button("📊 Toggle Detail", key=f"toggle_detail_{msg_index}", help="Switch between high-level and detailed view"):
+                st.session_state[detail_key] = not st.session_state[detail_key]
+                st.rerun()
+        
+        with col1:
+            if st.session_state[detail_key]:
+                st.markdown("**Detailed View** - Full agent inputs and outputs")
+            else:
+                st.markdown("**High-Level View** - Agent progress summary")
+        
+        # Map agent names to token usage keys
+        agent_token_map = {
+            "Table Selection Agent": "table_selection",
+            "Column Selection Agent": "column_selection", 
+            "SQL Generation Agent": "sql_generation",
+            "SQL Execution Agent": "sql_execution"
+        }
+        
+        # Display each step
+        for i, step in enumerate(thinking_process):
+            step_number = i + 1
+            agent_name = step.get("agent", f"Step {step_number}")
+            status = step.get("status", "unknown")
+            description = step.get("description", "Processing...")
+            
+            # Get token usage for this agent
+            agent_tokens = None
+            if token_usage and agent_name in agent_token_map:
+                agent_key = agent_token_map[agent_name]
+                if agent_key in token_usage:
+                    agent_tokens = token_usage[agent_key]
+            
+            # Status emoji
+            status_emoji = "✅" if status == "completed" else "⏳" if status == "processing" else "❓"
+            
+            # High-level view
+            if not st.session_state[detail_key]:
+                # Simple progress view with token info
+                status_class = "thinking-step-completed" if status == "completed" else "thinking-step-processing"
+                token_info = ""
+                if agent_tokens and status == "completed":
+                    token_info = f'<div class="step-details">🔢 Tokens: {agent_tokens.get("total_tokens", 0)} total ({agent_tokens.get("input_tokens", 0)} in + {agent_tokens.get("output_tokens", 0)} out)</div>'
+                
+                st.markdown(f"""
+                <div class="thinking-step {status_class}">
+                    <div class="agent-name">{status_emoji} Step {step_number}: {agent_name}</div>
+                    <div class="step-details">{description}</div>
+                    {f'<div class="step-details">✨ {step["details"]}</div>' if status == "completed" and "details" in step else ''}
+                    {token_info}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Detailed view
+            else:
+                with st.expander(f"{status_emoji} Step {step_number}: {agent_name}", expanded=True):
+                    st.markdown(f"**Description:** {description}")
+                    st.markdown(f"**Status:** {status.title()}")
+                    
+                    # Token usage info for completed steps
+                    if agent_tokens and status == "completed":
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Input Tokens", agent_tokens.get("input_tokens", 0))
+                        with col2:
+                            st.metric("Output Tokens", agent_tokens.get("output_tokens", 0))
+                        with col3:
+                            st.metric("Total Tokens", agent_tokens.get("total_tokens", 0))
+                        with col4:
+                            st.metric("API Calls", agent_tokens.get("api_calls", 0))
+                    
+                    # Input section
+                    if "input" in step:
+                        st.markdown("**Input:**")
+                        input_data = step["input"]
+                        if isinstance(input_data, str):
+                            st.code(input_data, language="text")
+                        else:
+                            st.json(input_data)
+                    
+                    # Output section
+                    if "output" in step and status == "completed":
+                        st.markdown("**Output:**")
+                        output_data = step["output"]
+                        if isinstance(output_data, str):
+                            # For SQL queries, use SQL syntax highlighting
+                            if agent_name == "SQL Generation Agent":
+                                st.code(output_data, language="sql")
+                            else:
+                                st.code(output_data, language="text")
+                        elif isinstance(output_data, list):
+                            st.json(output_data)
+                        elif isinstance(output_data, dict):
+                            # Special handling for different output types
+                            if "natural_response" in output_data:
+                                st.markdown("*Natural Response:*")
+                                st.markdown(output_data["natural_response"])
+                                if "dataframe_info" in output_data:
+                                    st.markdown(f"*Data Result:* {output_data['dataframe_info']}")
+                            else:
+                                st.json(output_data)
+                        else:
+                            st.write(output_data)
+                    
+                    # Details section
+                    if "details" in step:
+                        st.markdown(f"**Summary:** {step['details']}")
+        
+        # Total token usage summary
+        if token_usage and "total" in token_usage:
+            st.markdown("---")
+            st.markdown("### 📊 Total Token Usage Summary")
+            
+            total_tokens = token_usage["total"]
+            
+            if not st.session_state[detail_key]:
+                # High-level summary
+                st.markdown(f"""
+                <div class="thinking-step thinking-step-completed">
+                    <div class="agent-name">🔢 Pipeline Total Usage</div>
+                    <div class="step-details">Total: {total_tokens.get('total_tokens', 0)} tokens | API Calls: {total_tokens.get('api_calls', 0)}</div>
+                    <div class="step-details">Input: {total_tokens.get('input_tokens', 0)} tokens | Output: {total_tokens.get('output_tokens', 0)} tokens</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Detailed summary with metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Input", f"{total_tokens.get('input_tokens', 0):,}")
+                with col2:
+                    st.metric("Total Output", f"{total_tokens.get('output_tokens', 0):,}")
+                with col3:
+                    st.metric("Grand Total", f"{total_tokens.get('total_tokens', 0):,}")
+                with col4:
+                    st.metric("Total API Calls", total_tokens.get('api_calls', 0))
+                
+                # Breakdown by agent
+                st.markdown("**Breakdown by Agent:**")
+                for agent_display_name, agent_key in agent_token_map.items():
+                    if agent_key in token_usage:
+                        agent_data = token_usage[agent_key]
+                        st.markdown(f"- **{agent_display_name}**: {agent_data.get('total_tokens', 0)} tokens ({agent_data.get('api_calls', 0)} calls)")
+
+def display_chat_message(role, message, sql_query=None, dataframe=None, thinking_process=None, token_usage=None, msg_index=None):
     """Display a chat message with proper styling."""
     if role == "user":
         st.markdown(f"""
@@ -136,6 +357,10 @@ def display_chat_message(role, message, sql_query=None, dataframe=None, msg_inde
             <div>{message}</div>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Display thinking process if available
+        if thinking_process:
+            display_thinking_process(thinking_process, token_usage, msg_index)
         
         if sql_query or (dataframe is not None and not dataframe.empty):
             col1, col2 = st.columns(2)
@@ -271,7 +496,9 @@ def main():
             "role": "assistant",
             "content": ui_config["main"]["welcome_message"],
             "sql_query": None,
-            "dataframe": None
+            "dataframe": None,
+            "thinking_process": None,
+            "token_usage": None
         })
     
     # Display chat history
@@ -283,6 +510,8 @@ def main():
                 message["content"], 
                 message.get("sql_query"),
                 message.get("dataframe"),
+                message.get("thinking_process"),
+                message.get("token_usage"),
                 msg_index=i
             )
     
@@ -295,14 +524,25 @@ def main():
             "role": "user",
             "content": user_input,
             "sql_query": None,
-            "dataframe": None
+            "dataframe": None,
+            "thinking_process": None,
+            "token_usage": None
         })
         
         # Process the question
-        with st.spinner(ui_config["status_messages"]["processing_question"]):
+        with ProgressSpinner("🤔 Initializing AI agents...") as spinner:
             try:
+                # Define progress callback
+                def update_progress(message):
+                    spinner.update_text(message)
+                    time.sleep(0.1)  # Small delay to make progress visible
+                
                 # Use the pipeline to process the question
-                result = st.session_state.pipeline.process_question(user_input)
+                result = st.session_state.pipeline.process_question(user_input, progress_callback=update_progress)
+                
+                # Final step
+                spinner.update_text("✅ Processing complete!")
+                time.sleep(0.5)  # Brief pause to show completion
                 
                 # Clean the SQL query from the pipeline result
                 clean_sql = clean_sql_query(result["sql_query"])
@@ -312,16 +552,21 @@ def main():
                     "role": "assistant",
                     "content": result["natural_response"],
                     "sql_query": clean_sql,
-                    "dataframe": result.get("dataframe")
+                    "dataframe": result.get("dataframe"),
+                    "thinking_process": result.get("thinking_process"),
+                    "token_usage": result.get("token_usage")
                 })
                 
             except Exception as e:
+                spinner.update_text("❌ Error occurred during processing")
                 error_message = f"{ui_config['status_messages']['error_prefix']}{str(e)}"
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_message,
                     "sql_query": None,
-                    "dataframe": None
+                    "dataframe": None,
+                    "thinking_process": None,
+                    "token_usage": None
                 })
         
         # Rerun to display the new messages
@@ -336,7 +581,9 @@ def main():
                 "role": "assistant",
                 "content": ui_config["chat"]["clear_confirmation_message"],
                 "sql_query": None,
-                "dataframe": None
+                "dataframe": None,
+                "thinking_process": None,
+                "token_usage": None
             })
             st.rerun()
     
@@ -356,28 +603,45 @@ def main():
                     "role": "user",
                     "content": question,
                     "sql_query": None,
-                    "dataframe": None
+                    "dataframe": None,
+                    "thinking_process": None,
+                    "token_usage": None
                 })
                 
                 # Process the example question
-                with st.spinner(ui_config["status_messages"]["processing_example"]):
+                with ProgressSpinner("🤔 Initializing AI agents...") as spinner:
                     try:
-                        result = st.session_state.pipeline.process_question(question)
+                        # Define progress callback
+                        def update_progress(message):
+                            spinner.update_text(message)
+                            time.sleep(0.1)  # Small delay to make progress visible
+                        
+                        result = st.session_state.pipeline.process_question(question, progress_callback=update_progress)
+                        
+                        # Final step
+                        spinner.update_text("✅ Processing complete!")
+                        time.sleep(0.5)  # Brief pause to show completion
+                        
                         # Clean the SQL query from the pipeline result
                         clean_sql = clean_sql_query(result["sql_query"])
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": result["natural_response"],
                             "sql_query": clean_sql,
-                            "dataframe": result.get("dataframe")
+                            "dataframe": result.get("dataframe"),
+                            "thinking_process": result.get("thinking_process"),
+                            "token_usage": result.get("token_usage")
                         })
                     except Exception as e:
+                        spinner.update_text("❌ Error occurred during processing")
                         error_message = f"{ui_config['status_messages']['example_error_prefix']}{str(e)}"
                         st.session_state.messages.append({
                             "role": "assistant",
                             "content": error_message,
                             "sql_query": None,
-                            "dataframe": None
+                            "dataframe": None,
+                            "thinking_process": None,
+                            "token_usage": None
                         })
                 
                 st.rerun()
