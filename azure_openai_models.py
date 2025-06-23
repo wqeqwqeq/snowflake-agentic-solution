@@ -418,7 +418,7 @@ class SQLExecutionAgent:
                 
                 if function_name == "execute_sql":
                     sql_query = function_args["sql_query"]
-                    df, df_string = execute_sql(self.conn, sql_query)
+                    df, df_string, success = execute_sql(self.conn, sql_query)
                     
                     messages.append({
                         "tool_call_id": tool_call.id,
@@ -665,9 +665,7 @@ def main():
     
     # Test questions
     test_questions = [
-        "What's the average salary for carmax engineer in 2024?",
-        "How many H1B applications were filed for software engineer positions?",
-        "Show me the top 5 companies by number of H1B applications"
+        "Check the pay for data engineer in Atlanta versus the pay in San Francisco over the last 5 years"
     ]
     
     try:
