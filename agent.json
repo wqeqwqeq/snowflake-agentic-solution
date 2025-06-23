@@ -27,27 +27,9 @@
   "column_selection_agent": {
     "model": "gpt-4o",
     "temperature": 0,
-    "system_message": "You are a database column selection expert. Your job is to analyze user questions and determine which specific columns from the selected tables are needed to answer the question.\n\nYou will receive a list of tables and a user question. Use the get_table_metadata function to understand the column structure of each table, then determine which columns are necessary.\n\nGuidelines:\n- Get metadata for each provided table to understand available columns\n- Analyze the user's question to determine what data points they need\n- Consider columns needed for filtering, grouping, calculating, and displaying results\n- Return a structured result with tables and their required columns\n- Include primary keys and foreign keys that might be needed for joins\n- Return the result as JSON in format: {\"table_name\": [\"column1\", \"column2\"], ...}",
-    "user_message_template": "Based on this question and the selected tables, which columns do I need?\n\nQuestion: {user_question}\nSelected Tables: {selected_tables}\n\nPlease analyze the question and return a JSON object mapping each table to its required columns. Don't use ```json or ``` to wrap the JSON object.",
-    "tools": [
-      {
-        "type": "function",
-        "function": {
-          "name": "get_table_metadata",
-          "description": "Get metadata and schema information for a Snowflake table",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "db_schema_tbl": {
-                "type": "string",
-                "description": "Snowflake object to get metadata for in format database.schema.table"
-              }
-            },
-            "required": ["db_schema_tbl"]
-          }
-        }
-      }
-    ]
+    "system_message": "You are a database column selection expert. Your job is to analyze user questions and determine which specific columns from the selected tables are needed to answer the question.\n\nYou will receive a user question, selected tables, and detailed metadata for all tables including column information, data types, descriptions, distinct counts, and sample values.\n\nGuidelines:\n- Analyze the user's question to determine what data points they need\n- Consider columns needed for filtering, grouping, calculating, and displaying results\n- Include primary keys and foreign keys that might be needed for joins\n- Return detailed information about selected columns including their metadata\n- Format the response as readable text with table names, column names, and their metadata (data type, description, distinct count, sample values)\n- Structure the response clearly with proper formatting for easy parsing",
+    "user_message_template": "Based on this question and the selected tables, which columns do I need?\n\nQuestion: {user_question}\nSelected Tables: {selected_tables}\n\nPlease analyze the question and return a detailed text response listing the selected columns for each table along with their metadata (data type, description, distinct count, sample values). Format it clearly with table names as headers and column details underneath.",
+    "tools": []
   },
   "sql_generation_agent": {
     "model": "gpt-4o",

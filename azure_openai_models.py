@@ -135,6 +135,7 @@ class TableSelectionAgent:
         
         # Parse the response to extract table list
         response_content = response.choices[0].message.content.strip()
+        print(response_content)
         try:
             # Try to parse as JSON list
             tables = json.loads(response_content)
@@ -146,7 +147,6 @@ class TableSelectionAgent:
         except json.JSONDecodeError:
             # If not valid JSON, try to extract table names manually
             print(f"Could not parse table selection response as JSON: {response_content}")
-            return ["parsed.combined.h1b_clean"]  # Fallback to default table
     
     def get_token_usage(self) -> Dict[str, int]:
         """
@@ -177,7 +177,7 @@ class ColumnSelectionAgent:
         self.total_tokens = 0
         self.api_calls = 0
     
-    def select_columns(self, user_question: str, selected_tables: List[str]) -> Dict[str, List[str]]:
+    def select_columns(self, user_question: str, selected_tables: List[str]) -> str:
         """
         Select relevant columns for answering the user question.
         
@@ -186,10 +186,17 @@ class ColumnSelectionAgent:
             selected_tables (List[str]): List of selected table names
             
         Returns:
-            Dict[str, List[str]]: Dictionary mapping table names to selected columns
+            str: Detailed text response with selected columns and their metadata
         """
-        # Get tools from config
-        tools = self.config["tools"]
+        # Get metadata for all selected tables in a loop
+        all_table_metadata = []
+        for table in selected_tables:
+            metadata = get_table_metadata(self.conn, table)
+            all_table_metadata.extend(metadata)  # extend since metadata is now a list
+        
+        # Convert metadata list to JSON string for the LLM
+        import json
+        combined_metadata = json.dumps(all_table_metadata, indent=2)
         
         # Get system message and user message template from config
         system_message = self.config["system_message"]
@@ -197,18 +204,19 @@ class ColumnSelectionAgent:
             user_question=user_question,
             selected_tables=selected_tables
         )
+        
+        # Add the metadata to the user message
+        user_message_with_metadata = f"{user_message}\n\nHere is the metadata for all selected tables:\n\n{combined_metadata}"
 
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": user_message_with_metadata}
         ]
         
-        # Call to get table metadata for selected tables
+        # Generate response without needing tool calls (metadata already provided)
         response = self.client.chat.completions.create(
             model=self.config["model"],
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
             temperature=self.config["temperature"]
         )
         
@@ -219,53 +227,9 @@ class ColumnSelectionAgent:
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
         
-        # Handle tool calls
-        while response.choices[0].message.tool_calls:
-            messages.append(response.choices[0].message)
-            
-            for tool_call in response.choices[0].message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-                
-                if function_name == "get_table_metadata":
-                    db_schema_tbl = function_args.get("db_schema_tbl")
-                    function_result = get_table_metadata(self.conn, db_schema_tbl)
-                    messages.append({
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_result
-                    })
-            
-            # Continue the conversation
-            response = self.client.chat.completions.create(
-                model=self.config["model"],
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=self.config["temperature"]
-            )
-            
-            # Track token usage
-            if hasattr(response, 'usage') and response.usage:
-                self.total_input_tokens += response.usage.prompt_tokens
-                self.total_output_tokens += response.usage.completion_tokens
-                self.total_tokens += response.usage.total_tokens
-                self.api_calls += 1
-        
-        # Parse the response to extract column mapping
+        # Return the detailed response directly
         response_content = response.choices[0].message.content.strip()
-        try:
-            # Try to parse as JSON dictionary
-            columns_mapping = json.loads(response_content)
-            if isinstance(columns_mapping, dict):
-                return columns_mapping
-            else:
-                print(f"Unexpected column selection response format: {response_content}")
-                return {table: ["*"] for table in selected_tables}
-        except json.JSONDecodeError:
-            print(f"Could not parse column selection response as JSON: {response_content}")
-            return {table: ["*"] for table in selected_tables}
+        return response_content
     
     def get_token_usage(self) -> Dict[str, int]:
         """
@@ -295,13 +259,13 @@ class SQLGenerationAgent:
         self.total_tokens = 0
         self.api_calls = 0
     
-    def generate_sql(self, user_question: str, selected_tables_columns: Dict[str, List[str]]) -> str:
+    def generate_sql(self, user_question: str, selected_tables_columns: str) -> str:
         """
         Generate SQL query based on user question and selected tables/columns.
         
         Args:
             user_question (str): Natural language question from user
-            selected_tables_columns (Dict[str, List[str]]): Selected tables and their columns
+            selected_tables_columns (str): Detailed text with selected tables, columns and metadata
             
         Returns:
             str: Generated SQL query
@@ -530,17 +494,13 @@ class TextToSQLPipeline:
         selected_tables_columns = self.column_selector.select_columns(user_question, selected_tables)
         
         # Update step 2 with results
-        column_summary = []
-        for table, columns in selected_tables_columns.items():
-            column_summary.append(f"{table}: {len(columns)} columns ({', '.join(columns[:3])}{'...' if len(columns) > 3 else ''})")
-        
         thinking_process[-1].update({
             "output": selected_tables_columns,
             "status": "completed",
-            "details": "Selected columns: " + "; ".join(column_summary)
+            "details": "Selected columns with detailed metadata"
         })
         
-        print(f"Selected tables and columns: {selected_tables_columns}")
+        print(f"Selected columns with metadata:\n{selected_tables_columns}")
         print()
         
         # Step 3: Generate SQL query

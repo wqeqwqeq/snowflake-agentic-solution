@@ -1,46 +1,49 @@
 import pandas as pd 
 
-def get_table_metadata(conn, db_schema_tbl: str) -> str:
+def get_table_metadata(conn, db_schema_tbl: str) -> list:
     """
-    Tool function to get metadata of a Snowflake table.
+    Tool function to get metadata of a Snowflake table from the metadata table.
     
     Args:
         conn: Database connection object
         db_schema_tbl (str): Full table reference in format database.schema.table
         
     Returns:
-        str: Formatted table schema information
+        list: List of dictionaries containing column metadata information
     """
     try:
-        # Parse database.schema.table format
-        parts = db_schema_tbl.split('.')
-        if len(parts) != 3:
-            return f"Invalid table reference format. Expected database.schema.table, got: {db_schema_tbl}"
+        import os
+        metadata_table = os.getenv('METADATA_TABLE')
+        if not metadata_table:
+            return "METADATA_TABLE environment variable not set"
         
-        database, schema, table = parts
-        
-        # Use the specified database
-        conn.execute(f'USE DATABASE {database}')
+        # Query the metadata table for this specific table
         conn.execute(f"""
-            SELECT column_name, data_type, is_nullable, column_default
-            FROM {database}.information_schema.columns 
-            WHERE table_schema = '{schema.upper()}' 
-            AND table_name = '{table.upper()}'
-            ORDER BY ordinal_position
+            SELECT column_name, data_type, comment, distinct_count, distinct_values
+            FROM {metadata_table}
+            WHERE table_name = '{db_schema_tbl}'
+            ORDER BY column_name
         """)
-        schema_data = conn.fetch()
+        metadata_results = conn.fetch()
         
-        if schema_data:
-            schema_str = f"Table: {database}.{schema}.{table}\nColumns:\n"
-            for row in schema_data:
-                nullable = "NULL" if row[2] == "YES" else "NOT NULL"
-                default = f", DEFAULT: {row[3]}" if row[3] else ""
-                schema_str += f"- {row[0]} ({row[1]}, {nullable}{default})\n"
-            return schema_str
+        if metadata_results:
+            columns_list = []
+            for row in metadata_results:
+                column_name, data_type, comment, distinct_count, distinct_values = row
+                column_info = {
+                    "table_name": db_schema_tbl,
+                    "column_name": column_name,
+                    "data_type": data_type,
+                    "description": comment,
+                    "distinct_count": distinct_count,
+                    "sample_values": distinct_values
+                }
+                columns_list.append(column_info)
+            return columns_list
         else:
-            return f"No schema information found for table {db_schema_tbl}"
+            return []
     except Exception as e:
-        return f"Error retrieving schema: {str(e)}"
+        return f"Error retrieving metadata: {str(e)}"
 
 
 def execute_sql(conn, sql_query: str, nrows: int = 10) -> tuple:
