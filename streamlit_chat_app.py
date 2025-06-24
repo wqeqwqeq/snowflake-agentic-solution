@@ -240,7 +240,9 @@ def display_thinking_process(thinking_process, token_usage=None, msg_index=None)
                 status_class = "thinking-step-completed" if status == "completed" else "thinking-step-processing"
                 token_info = ""
                 if agent_tokens and status == "completed":
-                    token_info = f'<div class="step-details">🔢 Tokens: {agent_tokens.get("total_tokens", 0)} total ({agent_tokens.get("input_tokens", 0)} in + {agent_tokens.get("output_tokens", 0)} out)</div>'
+                    cached_tokens = agent_tokens.get("cached_tokens", 0)
+                cached_info = f" + {cached_tokens} cached" if cached_tokens > 0 else ""
+                token_info = f'<div class="step-details">🔢 Tokens: {agent_tokens.get("total_tokens", 0)} total ({agent_tokens.get("input_tokens", 0)} in + {agent_tokens.get("output_tokens", 0)} out{cached_info})</div>'
                 
                 st.markdown(f"""
                 <div class="thinking-step {status_class}">
@@ -259,14 +261,16 @@ def display_thinking_process(thinking_process, token_usage=None, msg_index=None)
                     
                     # Token usage info for completed steps
                     if agent_tokens and status == "completed":
-                        col1, col2, col3, col4 = st.columns(4)
+                        col1, col2, col3, col4, col5 = st.columns(5)
                         with col1:
                             st.metric("Input Tokens", agent_tokens.get("input_tokens", 0))
                         with col2:
                             st.metric("Output Tokens", agent_tokens.get("output_tokens", 0))
                         with col3:
-                            st.metric("Total Tokens", agent_tokens.get("total_tokens", 0))
+                            st.metric("Cached Tokens", agent_tokens.get("cached_tokens", 0))
                         with col4:
+                            st.metric("Total Tokens", agent_tokens.get("total_tokens", 0))
+                        with col5:
                             st.metric("API Calls", agent_tokens.get("api_calls", 0))
                     
                     # Input section
@@ -315,23 +319,27 @@ def display_thinking_process(thinking_process, token_usage=None, msg_index=None)
             
             if not st.session_state[detail_key]:
                 # High-level summary
+                total_cached = total_tokens.get('cached_tokens', 0)
+                cached_display = f" | Cached: {total_cached} tokens" if total_cached > 0 else ""
                 st.markdown(f"""
                 <div class="thinking-step thinking-step-completed">
                     <div class="agent-name">🔢 Pipeline Total Usage</div>
                     <div class="step-details">Total: {total_tokens.get('total_tokens', 0)} tokens | API Calls: {total_tokens.get('api_calls', 0)}</div>
-                    <div class="step-details">Input: {total_tokens.get('input_tokens', 0)} tokens | Output: {total_tokens.get('output_tokens', 0)} tokens</div>
+                    <div class="step-details">Input: {total_tokens.get('input_tokens', 0)} tokens | Output: {total_tokens.get('output_tokens', 0)} tokens{cached_display}</div>
                 </div>
                 """, unsafe_allow_html=True)
             else:
                 # Detailed summary with metrics
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Total Input", f"{total_tokens.get('input_tokens', 0):,}")
                 with col2:
                     st.metric("Total Output", f"{total_tokens.get('output_tokens', 0):,}")
                 with col3:
-                    st.metric("Grand Total", f"{total_tokens.get('total_tokens', 0):,}")
+                    st.metric("Total Cached", f"{total_tokens.get('cached_tokens', 0):,}")
                 with col4:
+                    st.metric("Grand Total", f"{total_tokens.get('total_tokens', 0):,}")
+                with col5:
                     st.metric("Total API Calls", total_tokens.get('api_calls', 0))
                 
                 # Breakdown by agent
@@ -339,7 +347,10 @@ def display_thinking_process(thinking_process, token_usage=None, msg_index=None)
                 for agent_display_name, agent_key in agent_token_map.items():
                     if agent_key in token_usage:
                         agent_data = token_usage[agent_key]
-                        st.markdown(f"- **{agent_display_name}**: {agent_data.get('total_tokens', 0)} tokens ({agent_data.get('api_calls', 0)} calls)")
+                        cached_info = ""
+                        if agent_data.get('cached_tokens', 0) > 0:
+                            cached_info = f", {agent_data.get('cached_tokens', 0)} cached"
+                        st.markdown(f"- **{agent_display_name}**: {agent_data.get('total_tokens', 0)} tokens ({agent_data.get('input_tokens', 0)} in + {agent_data.get('output_tokens', 0)} out{cached_info}, {agent_data.get('api_calls', 0)} calls)")
 
 def display_chat_message(role, message, sql_query=None, dataframe=None, thinking_process=None, token_usage=None, msg_index=None):
     """Display a chat message with proper styling."""
