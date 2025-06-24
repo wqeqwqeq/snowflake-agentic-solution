@@ -72,24 +72,25 @@ class TableSelectionAgent:
         Returns:
             str: Natural language response with selected tables, columns and reasoning
         """
-        # Get tools from config
-        tools = self.config["tools"]
+        # Read the YAML schema directly
+        schema_content = self.read_yaml_schema("table_schema.yaml")
         
         # Get system message and user message template from config
         system_message = self.config["system_message"]
-        user_message = self.config["user_message_template"].format(user_question=user_question)
+        user_message = self.config["user_message_template"].format(
+            user_question=user_question,
+            schema_content=schema_content
+        )
 
         messages = [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message}
         ]
         
-        # First call to read YAML schema
+        # Single call to generate response with schema already provided
         response = self.client.chat.completions.create(
             model=self.config["model"],
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
             temperature=self.config["temperature"]
         )
         
@@ -99,39 +100,6 @@ class TableSelectionAgent:
             self.total_output_tokens += response.usage.completion_tokens
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
-        
-        # Handle tool calls
-        while response.choices[0].message.tool_calls:
-            messages.append(response.choices[0].message)
-            
-            for tool_call in response.choices[0].message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-                
-                if function_name == "read_yaml_schema":
-                    function_result = self.read_yaml_schema('table_schema.yaml')
-                    messages.append({
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_result
-                    })
-            
-            # Continue the conversation
-            response = self.client.chat.completions.create(
-                model=self.config["model"],
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=self.config["temperature"]
-            )
-            
-            # Track token usage
-            if hasattr(response, 'usage') and response.usage:
-                self.total_input_tokens += response.usage.prompt_tokens
-                self.total_output_tokens += response.usage.completion_tokens
-                self.total_tokens += response.usage.total_tokens
-                self.api_calls += 1
         
         # Return the natural language response
         response_content = response.choices[0].message.content.strip()
