@@ -59,6 +59,7 @@ class TableSelectionAgent:
         self.config = load_agent_config(config_file)["table_selection_agent"]
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cached_tokens = 0
         self.total_tokens = 0
         self.api_calls = 0
     
@@ -98,6 +99,10 @@ class TableSelectionAgent:
         if hasattr(response, 'usage') and response.usage:
             self.total_input_tokens += response.usage.prompt_tokens
             self.total_output_tokens += response.usage.completion_tokens
+            # Track cached tokens if available
+            if hasattr(response.usage, 'prompt_tokens_details') and response.usage.prompt_tokens_details:
+                if hasattr(response.usage.prompt_tokens_details, 'cached_tokens'):
+                    self.total_cached_tokens += response.usage.prompt_tokens_details.cached_tokens or 0
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
         
@@ -134,6 +139,7 @@ class TableSelectionAgent:
         return {
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            "cached_tokens": self.total_cached_tokens,
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls
         }
@@ -152,6 +158,7 @@ class SQLGenerationAgent:
         self.config = load_agent_config(config_file)["sql_generation_agent"]
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cached_tokens = 0
         self.total_tokens = 0
         self.api_calls = 0
     
@@ -189,6 +196,10 @@ class SQLGenerationAgent:
         if hasattr(response, 'usage') and response.usage:
             self.total_input_tokens += response.usage.prompt_tokens
             self.total_output_tokens += response.usage.completion_tokens
+            # Track cached tokens if available
+            if hasattr(response.usage, 'prompt_tokens_details') and response.usage.prompt_tokens_details:
+                if hasattr(response.usage.prompt_tokens_details, 'cached_tokens'):
+                    self.total_cached_tokens += response.usage.prompt_tokens_details.cached_tokens or 0
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
         
@@ -204,6 +215,7 @@ class SQLGenerationAgent:
         return {
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            "cached_tokens": self.total_cached_tokens,
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls
         }
@@ -221,6 +233,7 @@ class SQLExecutionAgent:
         self.config = load_agent_config(config_file)["sql_execution_agent"]
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cached_tokens = 0
         self.total_tokens = 0
         self.api_calls = 0
     
@@ -265,6 +278,10 @@ class SQLExecutionAgent:
         if hasattr(response, 'usage') and response.usage:
             self.total_input_tokens += response.usage.prompt_tokens
             self.total_output_tokens += response.usage.completion_tokens
+            # Track cached tokens if available
+            if hasattr(response.usage, 'prompt_tokens_details') and response.usage.prompt_tokens_details:
+                if hasattr(response.usage.prompt_tokens_details, 'cached_tokens'):
+                    self.total_cached_tokens += response.usage.prompt_tokens_details.cached_tokens or 0
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
         
@@ -300,6 +317,10 @@ class SQLExecutionAgent:
             if hasattr(response, 'usage') and response.usage:
                 self.total_input_tokens += response.usage.prompt_tokens
                 self.total_output_tokens += response.usage.completion_tokens
+                # Track cached tokens if available
+                if hasattr(response.usage, 'prompt_tokens_details') and response.usage.prompt_tokens_details:
+                    if hasattr(response.usage.prompt_tokens_details, 'cached_tokens'):
+                        self.total_cached_tokens += response.usage.prompt_tokens_details.cached_tokens or 0
                 self.total_tokens += response.usage.total_tokens
                 self.api_calls += 1
         
@@ -315,6 +336,7 @@ class SQLExecutionAgent:
         return {
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            "cached_tokens": self.total_cached_tokens,
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls
         }
@@ -365,11 +387,10 @@ class TextToSQLPipeline:
         thinking_process[-1].update({
             "output": selected_tables_columns,
             "status": "completed",
-            "details": f"Selected tables and columns: {selected_tables_columns}"
+            "details": f"Selected tables and columns: {len(selected_tables_columns)} words"
         })
         
         print(f"Selected tables and columns: {selected_tables_columns}")
-        print()
         
         # Step 2: Generate SQL query
         if progress_callback:
@@ -446,11 +467,13 @@ class TextToSQLPipeline:
                              sql_gen_usage["input_tokens"] + sql_exec_usage["input_tokens"])
         total_output_tokens = (table_usage["output_tokens"] + 
                               sql_gen_usage["output_tokens"] + sql_exec_usage["output_tokens"])
+        total_cached_tokens = (table_usage["cached_tokens"] + 
+                              sql_gen_usage["cached_tokens"] + sql_exec_usage["cached_tokens"])
         total_tokens = total_input_tokens + total_output_tokens
         total_api_calls = (table_usage["api_calls"] + 
                           sql_gen_usage["api_calls"] + sql_exec_usage["api_calls"])
         
-        print(f"Total Pipeline Usage: Input: {total_input_tokens}, Output: {total_output_tokens}, Total: {total_tokens}, API Calls: {total_api_calls}")
+        print(f"Total Pipeline Usage: Input: {total_input_tokens}, Output: {total_output_tokens}, Cached: {total_cached_tokens}, Total: {total_tokens}, API Calls: {total_api_calls}")
         print()
         
         return {
@@ -467,6 +490,7 @@ class TextToSQLPipeline:
                 "total": {
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens,
+                    "cached_tokens": total_cached_tokens,
                     "total_tokens": total_tokens,
                     "api_calls": total_api_calls
                 }
