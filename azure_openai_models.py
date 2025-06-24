@@ -5,27 +5,28 @@ from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
 from snowflake_conn import snowflake_conn
 from llm_tools import get_table_metadata, execute_sql, read_table_descriptions
+import yaml
 
 # Load environment variables from .env file
 load_dotenv()
 
-def load_agent_config(config_file: str = "agent.json") -> Dict[str, Any]:
+def load_agent_config(config_file: str = "agent.yaml") -> Dict[str, Any]:
     """
-    Load agent configurations from JSON file.
+    Load agent configurations from YAML file.
     
     Args:
-        config_file (str): Path to the configuration JSON file
+        config_file (str): Path to the configuration YAML file
         
     Returns:
         Dict[str, Any]: Agent configurations
     """
     try:
         with open(config_file, 'r') as f:
-            return json.load(f)
+            return yaml.safe_load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"Configuration file {config_file} not found")
-    except json.JSONDecodeError:
-        raise ValueError(f"Invalid JSON in configuration file {config_file}")
+    except yaml.YAMLError:
+        raise ValueError(f"Invalid YAML in configuration file {config_file}")
 
 def create_openai_client(use_azure: bool = False):
     """
@@ -50,10 +51,10 @@ def create_openai_client(use_azure: bool = False):
 
 class TableSelectionAgent:
     """
-    Agent 1: Selects relevant tables based on user question and table descriptions.
+    Agent 1: Selects relevant tables and columns based on user question and YAML schema.
     """
     
-    def __init__(self, use_azure: bool = False, config_file: str = "agent.json"):
+    def __init__(self, use_azure: bool = False, config_file: str = "agent.yaml"):
         self.client = create_openai_client(use_azure)
         self.config = load_agent_config(config_file)["table_selection_agent"]
         self.total_input_tokens = 0
@@ -61,15 +62,15 @@ class TableSelectionAgent:
         self.total_tokens = 0
         self.api_calls = 0
     
-    def select_tables(self, user_question: str) -> List[str]:
+    def select_tables_and_columns(self, user_question: str) -> str:
         """
-        Select relevant tables for answering the user question.
+        Select relevant tables and columns for answering the user question.
         
         Args:
             user_question (str): Natural language question from user
             
         Returns:
-            List[str]: List of selected table names
+            str: Natural language response with selected tables, columns and reasoning
         """
         # Get tools from config
         tools = self.config["tools"]
@@ -83,7 +84,7 @@ class TableSelectionAgent:
             {"role": "user", "content": user_message}
         ]
         
-        # First call to read table descriptions
+        # First call to read YAML schema
         response = self.client.chat.completions.create(
             model=self.config["model"],
             messages=messages,
@@ -107,9 +108,8 @@ class TableSelectionAgent:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
                 
-                if function_name == "read_table_descriptions":
-                    file_path = function_args.get("file_path", "table_description.md")
-                    function_result = read_table_descriptions(file_path)
+                if function_name == "read_yaml_schema":
+                    function_result = self.read_yaml_schema('table_schema.yaml')
                     messages.append({
                         "tool_call_id": tool_call.id,
                         "role": "tool",
@@ -133,104 +133,29 @@ class TableSelectionAgent:
                 self.total_tokens += response.usage.total_tokens
                 self.api_calls += 1
         
-        # Parse the response to extract table list
-        response_content = response.choices[0].message.content.strip()
-        print(response_content)
-        try:
-            # Try to parse as JSON list
-            tables = json.loads(response_content)
-            if isinstance(tables, list):
-                return tables
-            else:
-                # If not a list, wrap in list
-                return [tables] if tables else []
-        except json.JSONDecodeError:
-            # If not valid JSON, try to extract table names manually
-            print(f"Could not parse table selection response as JSON: {response_content}")
-    
-    def get_token_usage(self) -> Dict[str, int]:
-        """
-        Get token usage statistics for this agent.
-        
-        Returns:
-            Dict[str, int]: Token usage statistics
-        """
-        return {
-            "input_tokens": self.total_input_tokens,
-            "output_tokens": self.total_output_tokens,
-            "total_tokens": self.total_tokens,
-            "api_calls": self.api_calls
-        }
-
-
-class ColumnSelectionAgent:
-    """
-    Agent 2: Selects relevant columns from selected tables based on user question.
-    """
-    
-    def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.json"):
-        self.client = create_openai_client(use_azure)
-        self.conn = conn
-        self.config = load_agent_config(config_file)["column_selection_agent"]
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_tokens = 0
-        self.api_calls = 0
-    
-    def select_columns(self, user_question: str, selected_tables: List[str]) -> str:
-        """
-        Select relevant columns for answering the user question.
-        
-        Args:
-            user_question (str): Natural language question from user
-            selected_tables (List[str]): List of selected table names
-            
-        Returns:
-            str: Detailed text response with selected columns and their metadata
-        """
-        # Get metadata for all selected tables in a loop
-        all_table_metadata = []
-        for table in selected_tables:
-            metadata = get_table_metadata(self.conn, table)
-            all_table_metadata.extend(metadata)  # extend since metadata is now a list
-        
-        # Convert metadata list to JSON string for the LLM
-        import json
-        combined_metadata = json.dumps(all_table_metadata, indent=2)
-        
-        # Get system message and user message template from config
-        system_message = self.config["system_message"]
-        user_message = self.config["user_message_template"].format(
-            user_question=user_question,
-            selected_tables=selected_tables
-        )
-        
-        # Add the metadata to the user message
-        user_message_with_metadata = f"{user_message}\n\nHere is the metadata for all selected tables:\n\n{combined_metadata}"
-
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message_with_metadata}
-        ]
-        
-        # Generate response without needing tool calls (metadata already provided)
-        response = self.client.chat.completions.create(
-            model=self.config["model"],
-            messages=messages,
-            temperature=self.config["temperature"]
-        )
-        
-        # Track token usage
-        if hasattr(response, 'usage') and response.usage:
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
-            self.total_tokens += response.usage.total_tokens
-            self.api_calls += 1
-        
-        # Return the detailed response directly
+        # Return the natural language response
         response_content = response.choices[0].message.content.strip()
         return response_content
     
+    def read_yaml_schema(self, file_path: str) -> str:
+        """
+        Read and return the YAML schema file content.
+        
+        Args:
+            file_path (str): Path to the YAML schema file
+            
+        Returns:
+            str: YAML content as string
+        """
+        try:
+            with open(file_path, 'r') as f:
+                yaml_content = yaml.safe_load(f)
+                return yaml.dump(yaml_content, default_flow_style=False, indent=2)
+        except FileNotFoundError:
+            return f"Error: YAML schema file {file_path} not found"
+        except yaml.YAMLError as e:
+            return f"Error parsing YAML file: {str(e)}"
+    
     def get_token_usage(self) -> Dict[str, int]:
         """
         Get token usage statistics for this agent.
@@ -244,6 +169,9 @@ class ColumnSelectionAgent:
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls
         }
+
+
+
 
 
 class SQLGenerationAgent:
@@ -251,7 +179,7 @@ class SQLGenerationAgent:
     Agent 3: Generates SQL queries based on selected tables and columns.
     """
     
-    def __init__(self, use_azure: bool = False, config_file: str = "agent.json"):
+    def __init__(self, use_azure: bool = False, config_file: str = "agent.yaml"):
         self.client = create_openai_client(use_azure)
         self.config = load_agent_config(config_file)["sql_generation_agent"]
         self.total_input_tokens = 0
@@ -319,7 +247,7 @@ class SQLExecutionAgent:
     Has access to execute_sql tool.
     """
     
-    def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.json"):
+    def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.yaml"):
         self.client = create_openai_client(use_azure)
         self.conn = conn
         self.config = load_agent_config(config_file)["sql_execution_agent"]
@@ -429,9 +357,8 @@ class TextToSQLPipeline:
     Complete pipeline that combines all agents for end-to-end text-to-SQL functionality.
     """
     
-    def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.json"):
+    def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.yaml"):
         self.table_selector = TableSelectionAgent(use_azure, config_file)
-        self.column_selector = ColumnSelectionAgent(conn, use_azure, config_file)
         self.sql_generator = SQLGenerationAgent(use_azure, config_file)
         self.sql_executor = SQLExecutionAgent(conn, use_azure, config_file)
     
@@ -464,50 +391,23 @@ class TextToSQLPipeline:
         }
         thinking_process.append(step1_start)
         
-        selected_tables = self.table_selector.select_tables(user_question)
+        selected_tables_columns = self.table_selector.select_tables_and_columns(user_question)
         
         # Update step 1 with results
         thinking_process[-1].update({
-            "output": selected_tables,
-            "status": "completed",
-            "details": f"Selected {len(selected_tables)} table(s): {', '.join(selected_tables)}"
-        })
-        
-        print(f"Selected tables: {selected_tables}")
-        print()
-        
-        # Step 2: Select relevant columns from selected tables
-        if progress_callback:
-            progress_callback("📋 Column Selection Agent - Analyzing table columns...")
-        print("Step 2: Selecting relevant columns...")
-        step2_start = {
-            "agent": "Column Selection Agent",
-            "description": "Analyzing selected tables to identify relevant columns",
-            "input": {
-                "question": user_question,
-                "selected_tables": selected_tables
-            },
-            "status": "processing"
-        }
-        thinking_process.append(step2_start)
-        
-        selected_tables_columns = self.column_selector.select_columns(user_question, selected_tables)
-        
-        # Update step 2 with results
-        thinking_process[-1].update({
             "output": selected_tables_columns,
             "status": "completed",
-            "details": "Selected columns with detailed metadata"
+            "details": f"Selected tables and columns: {selected_tables_columns}"
         })
         
-        print(f"Selected columns with metadata:\n{selected_tables_columns}")
+        print(f"Selected tables and columns: {selected_tables_columns}")
         print()
         
-        # Step 3: Generate SQL query
+        # Step 2: Generate SQL query
         if progress_callback:
             progress_callback("⚡ SQL Generation Agent - Creating SQL query...")
-        print("Step 3: Generating SQL query...")
-        step3_start = {
+        print("Step 2: Generating SQL query...")
+        step2_start = {
             "agent": "SQL Generation Agent",
             "description": "Generating SQL query based on selected tables and columns",
             "input": {
@@ -516,11 +416,11 @@ class TextToSQLPipeline:
             },
             "status": "processing"
         }
-        thinking_process.append(step3_start)
+        thinking_process.append(step2_start)
         
         sql_query = self.sql_generator.generate_sql(user_question, selected_tables_columns)
         
-        # Update step 3 with results
+        # Update step 2 with results
         thinking_process[-1].update({
             "output": sql_query,
             "status": "completed",
@@ -530,11 +430,11 @@ class TextToSQLPipeline:
         print(f"Generated SQL: {sql_query}")
         print()
         
-        # Step 4: Execute SQL and generate response
+        # Step 3: Execute SQL and generate response
         if progress_callback:
             progress_callback("🚀 SQL Execution Agent - Running query and generating response...")
-        print("Step 4: Executing SQL and generating response...")
-        step4_start = {
+        print("Step 3: Executing SQL and generating response...")
+        step3_start = {
             "agent": "SQL Execution Agent",
             "description": "Executing SQL query and generating natural language response",
             "input": {
@@ -543,11 +443,11 @@ class TextToSQLPipeline:
             },
             "status": "processing"
         }
-        thinking_process.append(step4_start)
+        thinking_process.append(step3_start)
         
         natural_response, df = self.sql_executor.generate_response(user_question, sql_query)
         
-        # Update step 4 with results
+        # Update step 3 with results
         df_info = f"No data returned" if df is None or df.empty else f"{len(df)} rows, {len(df.columns)} columns"
         thinking_process[-1].update({
             "output": {
@@ -561,27 +461,25 @@ class TextToSQLPipeline:
         print(f"Natural Language Response: {natural_response}")
         print()
         
-        # Step 5: Collect token usage from all agents
+        # Step 4: Collect token usage from all agents
         if progress_callback:
             progress_callback("📊 Collecting token usage statistics...")
-        print("Step 5: Token Usage Summary...")
+        print("Step 4: Token Usage Summary...")
         table_usage = self.table_selector.get_token_usage()
-        column_usage = self.column_selector.get_token_usage()
         sql_gen_usage = self.sql_generator.get_token_usage()
         sql_exec_usage = self.sql_executor.get_token_usage()
         
         print(f"Table Selection Agent: {table_usage}")
-        print(f"Column Selection Agent: {column_usage}")
         print(f"SQL Generation Agent: {sql_gen_usage}")
         print(f"SQL Execution Agent: {sql_exec_usage}")
         
         # Calculate total token usage
-        total_input_tokens = (table_usage["input_tokens"] + column_usage["input_tokens"] + 
+        total_input_tokens = (table_usage["input_tokens"] + 
                              sql_gen_usage["input_tokens"] + sql_exec_usage["input_tokens"])
-        total_output_tokens = (table_usage["output_tokens"] + column_usage["output_tokens"] + 
+        total_output_tokens = (table_usage["output_tokens"] + 
                               sql_gen_usage["output_tokens"] + sql_exec_usage["output_tokens"])
         total_tokens = total_input_tokens + total_output_tokens
-        total_api_calls = (table_usage["api_calls"] + column_usage["api_calls"] + 
+        total_api_calls = (table_usage["api_calls"] + 
                           sql_gen_usage["api_calls"] + sql_exec_usage["api_calls"])
         
         print(f"Total Pipeline Usage: Input: {total_input_tokens}, Output: {total_output_tokens}, Total: {total_tokens}, API Calls: {total_api_calls}")
@@ -589,7 +487,6 @@ class TextToSQLPipeline:
         
         return {
             "question": user_question,
-            "selected_tables": selected_tables,
             "selected_tables_columns": selected_tables_columns,
             "sql_query": sql_query,
             "natural_response": natural_response,
@@ -597,7 +494,6 @@ class TextToSQLPipeline:
             "thinking_process": thinking_process,
             "token_usage": {
                 "table_selection": table_usage,
-                "column_selection": column_usage,
                 "sql_generation": sql_gen_usage,
                 "sql_execution": sql_exec_usage,
                 "total": {
@@ -625,7 +521,7 @@ def main():
     
     # Test questions
     test_questions = [
-        "Check the pay for data engineer in Atlanta versus the pay in San Francisco over the last 5 years"
+        "Check the pay for a software engineer in Atlanta and compare it with the pay for a software engineer in San Francisco"  
     ]
     
     try:
