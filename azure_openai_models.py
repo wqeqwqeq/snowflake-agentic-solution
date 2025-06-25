@@ -49,29 +49,30 @@ def create_openai_client(use_azure: bool = False):
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
-class TableSelectionAgent:
+class SchemaToSQLAgent:
     """
-    Agent 1: Selects relevant tables and columns based on user question and YAML schema.
+    Combined Agent: Analyzes schema and generates SQL queries based on user question and YAML schema.
+    Combines the functionality of table selection and SQL generation into one efficient step.
     """
     
     def __init__(self, use_azure: bool = False, config_file: str = "agent.yaml"):
         self.client = create_openai_client(use_azure)
-        self.config = load_agent_config(config_file)["table_selection_agent"]
+        self.config = load_agent_config(config_file)["schema_to_sql_agent"]
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_cached_tokens = 0
         self.total_tokens = 0
         self.api_calls = 0
     
-    def select_tables_and_columns(self, user_question: str) -> str:
+    def generate_sql_from_schema(self, user_question: str) -> str:
         """
-        Select relevant tables and columns for answering the user question.
+        Analyze schema and generate SQL query for the user question.
         
         Args:
             user_question (str): Natural language question from user
             
         Returns:
-            str: Natural language response with selected tables, columns and reasoning
+            str: Generated SQL query
         """
         # Read the YAML schema directly
         schema_content = self.read_yaml_schema("table_schema.yaml")
@@ -88,7 +89,7 @@ class TableSelectionAgent:
             {"role": "user", "content": user_message}
         ]
         
-        # Single call to generate response with schema already provided
+        # Single call to generate SQL query with schema analysis
         response = self.client.chat.completions.create(
             model=self.config["model"],
             messages=messages,
@@ -106,7 +107,7 @@ class TableSelectionAgent:
             self.total_tokens += response.usage.total_tokens
             self.api_calls += 1
         
-        # Return the natural language response
+        # Return the SQL query
         response_content = response.choices[0].message.content.strip()
         return response_content
     
@@ -143,83 +144,6 @@ class TableSelectionAgent:
             "total_tokens": self.total_tokens,
             "api_calls": self.api_calls
         }
-
-
-
-
-
-class SQLGenerationAgent:
-    """
-    Agent 3: Generates SQL queries based on selected tables and columns.
-    """
-    
-    def __init__(self, use_azure: bool = False, config_file: str = "agent.yaml"):
-        self.client = create_openai_client(use_azure)
-        self.config = load_agent_config(config_file)["sql_generation_agent"]
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cached_tokens = 0
-        self.total_tokens = 0
-        self.api_calls = 0
-    
-    def generate_sql(self, user_question: str, selected_tables_columns: str) -> str:
-        """
-        Generate SQL query based on user question and selected tables/columns.
-        
-        Args:
-            user_question (str): Natural language question from user
-            selected_tables_columns (str): Detailed text with selected tables, columns and metadata
-            
-        Returns:
-            str: Generated SQL query
-        """
-        # Get system message and user message template from config
-        system_message = self.config["system_message"]
-        user_message = self.config["user_message_template"].format(
-            user_question=user_question,
-            selected_tables_columns=selected_tables_columns
-        )
-
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message}
-        ]
-        
-        # Generate SQL query
-        response = self.client.chat.completions.create(
-            model=self.config["model"],
-            messages=messages,
-            temperature=self.config["temperature"]
-        )
-        
-        # Track token usage
-        if hasattr(response, 'usage') and response.usage:
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
-            # Track cached tokens if available
-            if hasattr(response.usage, 'prompt_tokens_details') and response.usage.prompt_tokens_details:
-                if hasattr(response.usage.prompt_tokens_details, 'cached_tokens'):
-                    self.total_cached_tokens += response.usage.prompt_tokens_details.cached_tokens or 0
-            self.total_tokens += response.usage.total_tokens
-            self.api_calls += 1
-        
-        return response.choices[0].message.content.strip()
-    
-    def get_token_usage(self) -> Dict[str, int]:
-        """
-        Get token usage statistics for this agent.
-        
-        Returns:
-            Dict[str, int]: Token usage statistics
-        """
-        return {
-            "input_tokens": self.total_input_tokens,
-            "output_tokens": self.total_output_tokens,
-            "cached_tokens": self.total_cached_tokens,
-            "total_tokens": self.total_tokens,
-            "api_calls": self.api_calls
-        }
-
 
 class SQLExecutionAgent:
     """
@@ -348,8 +272,7 @@ class TextToSQLPipeline:
     """
     
     def __init__(self, conn, use_azure: bool = False, config_file: str = "agent.yaml"):
-        self.table_selector = TableSelectionAgent(use_azure, config_file)
-        self.sql_generator = SQLGenerationAgent(use_azure, config_file)
+        self.schema_to_sql = SchemaToSQLAgent(use_azure, config_file)
         self.sql_executor = SQLExecutionAgent(conn, use_azure, config_file)
     
     def process_question(self, user_question: str, progress_callback=None) -> Dict[str, Any]:
@@ -369,47 +292,21 @@ class TextToSQLPipeline:
         # Initialize thinking process tracking
         thinking_process = []
         
-        # Step 1: Select relevant tables
+        # Step 1: Analyze schema and generate SQL query
         if progress_callback:
-            progress_callback("🔍 Table Selection Agent - Identifying relevant tables...")
-        print("Step 1: Selecting relevant tables...")
+            progress_callback("⚡ Schema to SQL Agent - Analyzing schema and generating SQL query...")
+        print("Step 1: Analyzing schema and generating SQL query...")
         step1_start = {
-            "agent": "Table Selection Agent",
-            "description": "Analyzing the question to identify relevant tables",
+            "agent": "Schema to SQL Agent",
+            "description": "Analyzing schema and generating SQL query based on user question",
             "input": user_question,
             "status": "processing"
         }
         thinking_process.append(step1_start)
         
-        selected_tables_columns = self.table_selector.select_tables_and_columns(user_question)
+        sql_query = self.schema_to_sql.generate_sql_from_schema(user_question)
         
         # Update step 1 with results
-        thinking_process[-1].update({
-            "output": selected_tables_columns,
-            "status": "completed",
-            "details": f"Selected tables and columns: {len(selected_tables_columns)} words"
-        })
-        
-        print(f"Selected tables and columns: {selected_tables_columns}")
-        
-        # Step 2: Generate SQL query
-        if progress_callback:
-            progress_callback("⚡ SQL Generation Agent - Creating SQL query...")
-        print("Step 2: Generating SQL query...")
-        step2_start = {
-            "agent": "SQL Generation Agent",
-            "description": "Generating SQL query based on selected tables and columns",
-            "input": {
-                "question": user_question,
-                "selected_tables_columns": selected_tables_columns
-            },
-            "status": "processing"
-        }
-        thinking_process.append(step2_start)
-        
-        sql_query = self.sql_generator.generate_sql(user_question, selected_tables_columns)
-        
-        # Update step 2 with results
         thinking_process[-1].update({
             "output": sql_query,
             "status": "completed",
@@ -419,11 +316,11 @@ class TextToSQLPipeline:
         print(f"Generated SQL: {sql_query}")
         print()
         
-        # Step 3: Execute SQL and generate response
+        # Step 2: Execute SQL and generate response
         if progress_callback:
             progress_callback("🚀 SQL Execution Agent - Running query and generating response...")
-        print("Step 3: Executing SQL and generating response...")
-        step3_start = {
+        print("Step 2: Executing SQL and generating response...")
+        step2_start = {
             "agent": "SQL Execution Agent",
             "description": "Executing SQL query and generating natural language response",
             "input": {
@@ -432,11 +329,11 @@ class TextToSQLPipeline:
             },
             "status": "processing"
         }
-        thinking_process.append(step3_start)
+        thinking_process.append(step2_start)
         
         natural_response, df = self.sql_executor.generate_response(user_question, sql_query)
         
-        # Update step 3 with results
+        # Update step 2 with results
         df_info = f"No data returned" if df is None or df.empty else f"{len(df)} rows, {len(df.columns)} columns"
         thinking_process[-1].update({
             "output": {
@@ -450,42 +347,38 @@ class TextToSQLPipeline:
         print(f"Natural Language Response: {natural_response}")
         print()
         
-        # Step 4: Collect token usage from all agents
+        # Step 3: Collect token usage from all agents
         if progress_callback:
             progress_callback("📊 Collecting token usage statistics...")
-        print("Step 4: Token Usage Summary...")
-        table_usage = self.table_selector.get_token_usage()
-        sql_gen_usage = self.sql_generator.get_token_usage()
+        print("Step 3: Token Usage Summary...")
+        schema_to_sql_usage = self.schema_to_sql.get_token_usage()
         sql_exec_usage = self.sql_executor.get_token_usage()
         
-        print(f"Table Selection Agent: {table_usage}")
-        print(f"SQL Generation Agent: {sql_gen_usage}")
+        print(f"Schema to SQL Agent: {schema_to_sql_usage}")
         print(f"SQL Execution Agent: {sql_exec_usage}")
         
         # Calculate total token usage
-        total_input_tokens = (table_usage["input_tokens"] + 
-                             sql_gen_usage["input_tokens"] + sql_exec_usage["input_tokens"])
-        total_output_tokens = (table_usage["output_tokens"] + 
-                              sql_gen_usage["output_tokens"] + sql_exec_usage["output_tokens"])
-        total_cached_tokens = (table_usage["cached_tokens"] + 
-                              sql_gen_usage["cached_tokens"] + sql_exec_usage["cached_tokens"])
+        total_input_tokens = (schema_to_sql_usage["input_tokens"] + 
+                             sql_exec_usage["input_tokens"])
+        total_output_tokens = (schema_to_sql_usage["output_tokens"] + 
+                              sql_exec_usage["output_tokens"])
+        total_cached_tokens = (schema_to_sql_usage["cached_tokens"] + 
+                              sql_exec_usage["cached_tokens"])
         total_tokens = total_input_tokens + total_output_tokens
-        total_api_calls = (table_usage["api_calls"] + 
-                          sql_gen_usage["api_calls"] + sql_exec_usage["api_calls"])
+        total_api_calls = (schema_to_sql_usage["api_calls"] + 
+                          sql_exec_usage["api_calls"])
         
         print(f"Total Pipeline Usage: Input: {total_input_tokens}, Output: {total_output_tokens}, Cached: {total_cached_tokens}, Total: {total_tokens}, API Calls: {total_api_calls}")
         print()
         
         return {
             "question": user_question,
-            "selected_tables_columns": selected_tables_columns,
             "sql_query": sql_query,
             "natural_response": natural_response,
             "dataframe": df,
             "thinking_process": thinking_process,
             "token_usage": {
-                "table_selection": table_usage,
-                "sql_generation": sql_gen_usage,
+                "schema_to_sql": schema_to_sql_usage,
                 "sql_execution": sql_exec_usage,
                 "total": {
                     "input_tokens": total_input_tokens,
